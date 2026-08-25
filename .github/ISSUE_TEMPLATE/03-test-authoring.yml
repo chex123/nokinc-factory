@@ -1,0 +1,28 @@
+name: "Test authoring (frozen contract)"
+description: "Assign to Copilot. Produces ONLY tests. Merged BEFORE implementation."
+title: "[TESTS] "
+labels: ["tests", "frozen-contract"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Read this before starting
+        You are the **Test Author**. You write acceptance and contract tests, and
+        **no implementation whatsoever**. This PR must contain zero production code.
+        The tests you write are frozen and immutable to the Implementer.
+        They MUST FAIL against the current baseline — that is the point.
+  - type: input
+    id: design
+    attributes: {label: "Solution Ready design", description: "Issue number"}
+    validations: {required: true}
+  - type: textarea
+    id: scenarios
+    attributes: {label: "Scenarios to implement as executable tests (paste from the story)"}
+    validations: {required: true}
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Constraints
+      options:
+        - {label: "This PR will contain tests only — no production code", required: true}
+        - {label: "New scenarios must fail on the current baseline", required: true}

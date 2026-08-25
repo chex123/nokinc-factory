@@ -1,0 +1,49 @@
+name: "Design — Solution Ready (Gate 2)"
+description: "How we will build it. Requires an approved Business Ready story."
+title: "[DESIGN] "
+labels: ["design", "stage:solution-ready"]
+body:
+  - type: input
+    id: story
+    attributes: {label: "Business Ready story", description: "Issue number, e.g. #12"}
+    validations: {required: true}
+  - type: textarea
+    id: boundary
+    attributes: {label: "Service boundary decision + affected modules"}
+    validations: {required: true}
+  - type: textarea
+    id: contracts
+    attributes: {label: "API / event contract delta", description: "Schema changes, versioning, overlap window. 'None' is a valid answer."}
+    validations: {required: true}
+  - type: textarea
+    id: observability
+    attributes:
+      label: "Observability spec (MANDATORY)"
+      description: "Becomes the declared span topology. This is what makes output assurance-designed."
+      value: |
+        spans:   []
+        metrics: []
+    validations: {required: true}
+  - type: textarea
+    id: intent
+    attributes:
+      label: "Approved-intent delta (MANDATORY)"
+      description: "Empty-because-checked differs from empty-because-forgotten. Say which."
+      value: |
+        new_outbound_destinations: []
+        new_data_stores: []
+        new_capabilities: []
+        checked: true
+    validations: {required: true}
+  - type: dropdown
+    id: rollback
+    attributes: {label: "Rollback strategy", options: ["fix_forward","feature_flag","revert","backward_migration"]}
+    validations: {required: true}
+  - type: textarea
+    id: rollback_why
+    attributes: {label: "Rollback justification"}
+    validations: {required: true}
+  - type: dropdown
+    id: tier
+    attributes: {label: "Final risk tier", options: ["T0","T1","T2"]}
+    validations: {required: true}

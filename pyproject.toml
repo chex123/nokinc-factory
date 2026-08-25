@@ -1,0 +1,39 @@
+[project]
+name = "nokinc-factory"
+version = "0.1.0"
+description = "Nokinc Software Factory"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.9"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3","pytest-bdd>=8.0","pytest-cov>=6.0","diff-cover>=9.2",
+       "mypy>=1.14","ruff>=0.8","pydantic-ai-slim[openai]>=2,<3","detect-secrets>=1.5","pip-audit>=2.7"]
+# Added per phase, not up front. See docs/BOOTSTRAP.md.
+phase1 = ["fastapi>=0.115","sqlalchemy>=2.0","alembic>=1.14","psycopg[binary]>=3.2"]
+phase2 = ["mcp>=1.2","tree-sitter>=0.23","tree-sitter-language-pack>=0.3","multilspy>=0.0.14"]
+
+[project.scripts]
+factory = "nokinc_factory.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E","F","I","UP","B","C4","SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["C408"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

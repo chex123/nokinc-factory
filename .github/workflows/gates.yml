@@ -1,0 +1,119 @@
+name: gates
+
+on:
+  pull_request:
+  push: {branches: [main]}
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-gates:
+    name: deterministic-gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e ".[dev]"
+      - name: build
+        run: python -m compileall src
+      - name: types
+        run: mypy --strict src
+      - name: lint
+        run: ruff check src tests
+      - name: unit
+        run: pytest tests/unit -q
+      - name: acceptance
+        run: pytest tests/acceptance -q
+      - name: diff_coverage
+        if: github.event_name == 'pull_request'
+        run: |
+          pytest --cov=src --cov-report=xml -q
+          diff-cover coverage.xml --compare-branch="origin/${{ github.base_ref }}" --fail-under=90
+      - name: secret_scan
+        shell: bash
+        run: |
+          pip install detect-secrets
+          if [ -f .secrets.baseline ]; then
+            # scan --baseline UPDATES the baseline; it is not a blocking gate.
+            # The hook compares candidates against the reviewed baseline and exits non-zero.
+            git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline
+          else
+            detect-secrets scan > /tmp/scan.json
+            python - <<'PY'
+          import json, sys
+          results = json.load(open('/tmp/scan.json')).get('results', {})
+          for path, hits in results.items():
+              for h in hits:
+                  print(f"::error file={path},line={h['line_number']}::potential secret ({h['type']})")
+          sys.exit(1 if results else 0)
+          PY
+          fi
+      - name: dependency_scan
+        run: pip install pip-audit && pip-audit --strict
+
+  frozen-contract:
+    name: frozen-contract
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: enforce Test Author / Implementer separation
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=50
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)
+          echo "changed files:"; echo "$CHANGED" | sed 's/^/  /'
+          FROZEN='^(tests/acceptance/|tests/contract/|tests/regression/|tests/fixtures/|features/|step_definitions/)'
+
+          if echo "$LABELS" | grep -q "frozen-contract"; then
+            VIOLATIONS=$(echo "$CHANGED" | grep -vE "$FROZEN" || true)
+            if [ -n "$VIOLATIONS" ]; then
+              echo "::error::A test-authoring PR may modify ONLY frozen test-contract paths."
+              echo "$VIOLATIONS" | while read -r f; do [ -n "$f" ] && echo "::error file=$f::outside frozen-contract allowlist"; done
+              exit 1
+            fi
+            echo "$CHANGED" | grep -qE '^(tests/acceptance/|features/)' || {
+              echo "::error::A test-authoring PR must add executable acceptance behavior."; exit 1; }
+          fi
+
+          if echo "$LABELS" | grep -q "implementation"; then
+            VIOLATIONS=$(echo "$CHANGED" | grep -E "$FROZEN" || true)
+            if [ -n "$VIOLATIONS" ]; then
+              echo "::error::Implementation PRs must not modify frozen tests, bindings or fixtures."
+              echo "$VIOLATIONS" | while read -r f; do [ -n "$f" ] && echo "::error file=$f::frozen contract"; done
+              exit 1
+            fi
+          fi
+
+  baseline-assertion:
+    name: baseline-assertion
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'frozen-contract')
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: new scenarios must FAIL on the true baseline
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=50
+          mkdir -p /tmp/frozen
+          for p in tests/acceptance tests/contract tests/regression tests/fixtures features step_definitions; do
+            [ -e "$p" ] && { mkdir -p "/tmp/frozen/$(dirname "$p")"; cp -a "$p" "/tmp/frozen/$p"; }
+          done
+          git checkout -f "origin/${{ github.base_ref }}"
+          git clean -fdx -e .git
+          for p in tests/acceptance tests/contract tests/regression tests/fixtures features step_definitions; do
+            [ -e "/tmp/frozen/$p" ] && { rm -rf "$p"; mkdir -p "$(dirname "$p")"; cp -a "/tmp/frozen/$p" "$p"; }
+          done
+          pip install -e ".[dev]"
+          if pytest tests/acceptance -q; then
+            echo "::error::New acceptance scenarios PASS against the true baseline; they test nothing new."
+            exit 1
+          fi
+          echo "Correct - new scenarios fail on the true baseline."

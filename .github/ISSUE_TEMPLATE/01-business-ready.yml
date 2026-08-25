@@ -1,0 +1,62 @@
+name: "Story — Business Ready (Gate 1)"
+description: "What needs to happen. No architecture."
+title: "[STORY] "
+labels: ["story", "stage:business-ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Gate 1 answers one question: do we understand what needs to be done?**
+        No architecture here — the Architect runs *after* this gate. Mark unknowns
+        rather than guessing at them.
+  - type: textarea
+    id: problem
+    attributes: {label: "Problem and value", description: "Who has the problem, what it costs, what changes when this ships."}
+    validations: {required: true}
+  - type: textarea
+    id: scope_in
+    attributes: {label: "In scope"}
+    validations: {required: true}
+  - type: textarea
+    id: scope_out
+    attributes: {label: "OUT of scope (explicit)", description: "The strongest control on agent scope creep. Must not be empty."}
+    validations: {required: true}
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: "Acceptance scenarios (Gherkin)"
+      description: "At least one FAILURE or edge case is mandatory."
+      value: |
+        Scenario: <happy path>
+          Given ...
+          When ...
+          Then ...
+
+        Scenario: <failure or edge case — MANDATORY>
+          Given ...
+          When ...
+          Then ...
+    validations: {required: true}
+  - type: textarea
+    id: rules
+    attributes: {label: "Business rules", description: "Conditions, limits, thresholds — in business language."}
+    validations: {required: true}
+  - type: textarea
+    id: test_data
+    attributes: {label: "Test data needs", description: "What data proves the behaviour, and where it comes from."}
+    validations: {required: true}
+  - type: input
+    id: nfr
+    attributes: {label: "NFR / SLO impact", description: "A number, or an explicit 'no change'. 'Fast' is not a target."}
+    validations: {required: true}
+  - type: dropdown
+    id: classification
+    attributes: {label: "Data classification", options: ["NONE","PII","PAYMENT","HEALTH","CREDENTIAL"]}
+    validations: {required: true}
+  - type: dropdown
+    id: tier
+    attributes: {label: "Preliminary risk tier", options: ["T0","T1","T2"]}
+    validations: {required: true}
+  - type: textarea
+    id: unknowns
+    attributes: {label: "Open questions / unknowns", description: "Mark them. Do not resolve by assumption."}

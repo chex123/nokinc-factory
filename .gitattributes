@@ -1,0 +1,14 @@
+# Shell scripts MUST stay LF even on Windows checkouts.
+# Without this, Git for Windows converts them to CRLF and bash fails with
+#   set: pipefail\r: invalid option name
+* text=auto eol=lf
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.py    text eol=lf
+*.ts    text eol=lf
+*.tf    text eol=lf
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+*.png   binary
+*.gz    binary

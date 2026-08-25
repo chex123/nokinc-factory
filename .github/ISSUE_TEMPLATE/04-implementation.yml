@@ -1,0 +1,25 @@
+name: "Implementation"
+description: "Assign to Copilot. Requires merged frozen tests."
+title: "[IMPL] "
+labels: ["implementation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Read this before starting
+        The acceptance tests for this work are **already merged and frozen**.
+        You may not modify anything under `tests/acceptance/`. If you believe a
+        test is wrong, say so in the PR body and stop.
+        Work TDD inside: unit test → minimum code → pass → refactor.
+  - type: input
+    id: tests_pr
+    attributes: {label: "Frozen tests PR", description: "The merged tests PR number"}
+    validations: {required: true}
+  - type: input
+    id: design
+    attributes: {label: "Solution Ready design", description: "Issue number"}
+    validations: {required: true}
+  - type: textarea
+    id: task
+    attributes: {label: "What to implement", description: "Reference the spec Part. Be specific about the module and its boundary."}
+    validations: {required: true}

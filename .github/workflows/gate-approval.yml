@@ -1,0 +1,62 @@
+name: gate-approval
+
+# Stage-0 ApprovalPort: the workflow run is the immutable provider evidence.
+# The environment review approves this exact run, whose inputs bind the work item
+# and decision digest. The label is business state only; it is applied AFTER approval.
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Work item / issue number
+        required: true
+        type: string
+      gate:
+        description: Protected gate environment
+        required: true
+        type: choice
+        options: [gate-1, gate-2, gate-3, gate-4]
+      decision_digest:
+        description: sha256 digest of the exact BusinessReady/SolutionReady/release decision being approved
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  approve:
+    name: protected-gate-approval
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.gate }}
+    steps:
+      - name: validate and record approval evidence
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          GATE: ${{ inputs.gate }}
+          DECISION_DIGEST: ${{ inputs.decision_digest }}
+        with:
+          script: |
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const gate = process.env.GATE;
+            const digest = process.env.DECISION_DIGEST;
+            if (!Number.isInteger(issue_number) || issue_number < 1) { core.setFailed('invalid issue_number'); return; }
+            if (!/^sha256:[0-9a-f]{64}$/i.test(digest)) { core.setFailed('decision_digest must be sha256:<64 hex>'); return; }
+            const labels = { 'gate-1': 'stage:gate-1-approved', 'gate-2': 'stage:gate-2-approved', 'gate-3': 'stage:gate-3-approved', 'gate-4': 'stage:gate-4-approved' };
+            const label = labels[gate];
+            if (!label) { core.setFailed(`unsupported gate ${gate}`); return; }
+            await github.rest.issues.addLabels({ ...context.repo, issue_number, labels: [label] });
+            const evidence = [
+              '## Gate approval evidence',
+              `- gate: \`${gate}\``,
+              `- decision: \`${digest}\``,
+              `- workflow_run_id: \`${context.runId}\``,
+              `- workflow_run_attempt: \`${process.env.GITHUB_RUN_ATTEMPT}\``,
+              `- initiated_by: \`${context.actor}\``,
+              `- provider: GitHub Actions protected environment`,
+              '',
+              'The GitHub environment review/audit for this workflow run is the authoritative approver evidence. The label is lifecycle state only.'
+            ].join('\n');
+            await github.rest.issues.createComment({ ...context.repo, issue_number, body: evidence });
