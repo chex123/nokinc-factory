@@ -104,6 +104,22 @@ if [[ "$DRY" -eq 0 ]]; then
   done
 fi
 
+# Required environment reviewers must already have repository access. Fail with a
+# clear prerequisite error instead of sending an invalid/empty reviewer rule.
+if [[ "$DRY" -eq 0 ]]; then
+  for r in "${TARGETS[@]}"; do
+    permission="$(gh api "repos/$ORG/$r/collaborators/$GATE_REVIEWER/permission" --jq .permission 2>/dev/null || true)"
+    case "$permission" in
+      read|triage|write|maintain|admin) ;;
+      *)
+        echo "$GATE_REVIEWER must be an accepted collaborator on $ORG/$r before it can be an environment reviewer."
+        echo "Grant at least read permission and accept the invitation, then rerun bootstrap."
+        exit 1
+        ;;
+    esac
+  done
+fi
+
 # Common factory control files only. Language-specific gates.yml stays owned by each target.
 say "Propagating common factory controls (NOT language-specific gates)"
 for r in "${TARGETS[@]}"; do
@@ -150,8 +166,18 @@ else
   echo "OPENAI_API_KEY is not set. Cross-model review is fail-closed; set it before the first PR."
 fi
 
+# Bootstrap-generated controls must reach main BEFORE main becomes protected.
+# Otherwise the bootstrap deadlocks itself: the first protected push is rejected
+# because PR-only updates and required status checks are already active.
+say "Pushing bootstrap configuration before branch protection"
+for r in "${ALL[@]}"; do
+  run "(cd '$ROOT/$r' && git add -A && (git diff --cached --quiet || git commit -qm 'factory: protected MVP controls'))"
+  run "(cd '$ROOT/$r' && git push -q)"
+done
+
 # Two distinct approvals are enforced by branch protection. Environment reviewers
 # cannot enforce two-person approval: GitHub proceeds after any ONE listed reviewer.
+# This is deliberately the LAST mutating bootstrap step.
 say "Protecting main"
 for r in "${ALL[@]}"; do
   approvals=1
@@ -180,12 +206,6 @@ JSON
     echo "Re-run with --factory-public or upgrade the GitHub plan. Aborting rather than degrading."
     exit 1
   fi
-done
-
-say "Pushing configuration"
-for r in "${ALL[@]}"; do
-  run "(cd '$ROOT/$r' && git add -A && (git diff --cached --quiet || git commit -qm 'factory: protected MVP controls'))"
-  run "(cd '$ROOT/$r' && git push -q)"
 done
 
 say "Bootstrap complete"
