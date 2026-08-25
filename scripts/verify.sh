@@ -12,6 +12,9 @@ REQUIRED=(deterministic-gates frozen-contract baseline-assertion cross-model-rev
 for r in "${ALL[@]}"; do
   printf '\n\033[1m%s\033[0m\n' "$r"
   gh repo view "$ORG/$r" >/dev/null 2>&1 && ok "repo exists" || { bad "repo missing"; continue; }
+  codeowners=$(gh api "repos/$ORG/$r/contents/.github/CODEOWNERS" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode 2>/dev/null || true)
+  github_owner_count=$(printf '%s\n' "$codeowners" | awk '$1 == "/.github/" { for (i = 2; i <= NF; i++) if ($i ~ /^@/) print $i }' | sort -u | wc -l | tr -d '[:space:]')
+  [[ "$github_owner_count" -ge 2 ]] && ok "/.github/ code owners=$github_owner_count" || bad "/.github/ has fewer than two code owners"
   gh api "repos/$ORG/$r/contents/.github/workflows/gates.yml" >/dev/null 2>&1 && ok "language-appropriate gates.yml present" || bad "gates.yml missing"
   gh api "repos/$ORG/$r/contents/.github/workflows/cross-model-review.yml" >/dev/null 2>&1 && ok "privileged review workflow present" || bad "review workflow missing"
   gh api "repos/$ORG/$r/branches/main/protection" >/dev/null 2>&1 && ok "main protected" || bad "main unprotected"

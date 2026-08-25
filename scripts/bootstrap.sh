@@ -130,9 +130,9 @@ for r in "${TARGETS[@]}"; do
   run "cp '$ROOT/$FACTORY/templates/target-copilot-instructions.md' '$ROOT/$r/.github/copilot-instructions.md'"
   run "cp '$ROOT/$FACTORY/templates/target-AGENTS.md' '$ROOT/$r/AGENTS.md'"
   run "mkdir -p '$ROOT/$r/docs' && cp '$ROOT/$FACTORY/docs/factory-spec.md' '$ROOT/$r/docs/factory-spec.md'"
-  run "printf '/tests/acceptance/ @%s\n/tests/contract/ @%s\n/tests/regression/ @%s\n/.github/ @%s\n' '$ME' '$ME' '$ME' '$ME' > '$ROOT/$r/.github/CODEOWNERS'"
+  run "printf '/tests/acceptance/ @%s @%s\n/tests/contract/ @%s @%s\n/tests/regression/ @%s @%s\n/.github/ @%s @%s\n' '$ME' '$GATE_REVIEWER' '$ME' '$GATE_REVIEWER' '$ME' '$GATE_REVIEWER' '$ME' '$GATE_REVIEWER' > '$ROOT/$r/.github/CODEOWNERS'"
 done
-run "printf '/tests/acceptance/ @%s\n/docs/factory-spec.md @%s\n/.github/ @%s\n' '$ME' '$ME' '$ME' > '$ROOT/$FACTORY/.github/CODEOWNERS'"
+run "printf '/tests/acceptance/ @%s @%s\n/docs/factory-spec.md @%s @%s\n/.github/ @%s @%s\n' '$ME' '$GATE_REVIEWER' '$ME' '$GATE_REVIEWER' '$ME' '$GATE_REVIEWER' > '$ROOT/$FACTORY/.github/CODEOWNERS'"
 
 say "Creating labels"
 for r in "${ALL[@]}"; do
