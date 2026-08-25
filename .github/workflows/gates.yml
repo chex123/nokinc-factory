@@ -52,7 +52,7 @@ jobs:
           PY
           fi
       - name: dependency_scan
-        run: pip install pip-audit && pip-audit --strict --skip-editable
+        run: pip install pip-audit && pip-audit . --strict
 
   frozen-contract:
     name: frozen-contract
