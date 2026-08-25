@@ -35,6 +35,18 @@ def test_valid_canonical_codeowners_with_two_eligible_distinct_owners_passes(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_codeowners_retrieval_is_explicitly_bound_to_protected_branch(tmp_path: Path) -> None:
+    result = run_verify_codeowners(
+        tmp_path,
+        FACTORY,
+        codeowners(FACTORY_PATHS),
+        ELIGIBLE_PERMISSIONS,
+        require_protected_branch_ref=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize(
     ("repository", "paths", "one_owner_path"),
     [

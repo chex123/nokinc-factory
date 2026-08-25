@@ -43,9 +43,10 @@ def run_verify_codeowners(
     permissions: Mapping[str, PermissionResponse],
     *,
     codeowners_api_succeeds: bool = True,
+    require_protected_branch_ref: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     encoded_codeowners = base64.b64encode(codeowners_text.encode("utf-8")).decode("ascii")
-    contents_path = f"repos/test-org/{repository}/contents/.github/CODEOWNERS"
+    contents_path = f"repos/test-org/{repository}/contents/.github/CODEOWNERS?ref=main"
     collaborators_prefix = f"repos/test-org/{repository}/collaborators/"
     permission_cases = "\n".join(
         _permission_case(owner, response) for owner, response in permissions.items()
@@ -58,7 +59,11 @@ contents_path={shlex.quote(contents_path)}
 collaborators_prefix={shlex.quote(collaborators_prefix)}
 encoded_codeowners={shlex.quote(encoded_codeowners)}
 codeowners_api_succeeds={"1" if codeowners_api_succeeds else "0"}
+require_protected_branch_ref={"1" if require_protected_branch_ref else "0"}
 [[ "$1" == "api" ]] || exit 1
+if [[ "$require_protected_branch_ref" == "1" && "$2" == *"/contents/.github/CODEOWNERS" ]]; then
+    exit 1
+fi
 if [[ "$2" == "$contents_path" ]]; then
   [[ "$codeowners_api_succeeds" == "1" ]] || exit 1
   printf '%s\\n' "$encoded_codeowners"
