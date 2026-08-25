@@ -33,7 +33,7 @@ is_expected_codeowners_path() {
 verify_codeowners() {
   local org="$1"
   local repository="$2"
-  local encoded_codeowners codeowners path line owner permission
+  local encoded_codeowners codeowners path line owner permission canonical_owner permission_response extra
   local valid=1
   local -a expected_paths fields owners
   local -A path_counts path_owners seen_owners
@@ -96,8 +96,19 @@ verify_codeowners() {
         valid=0
         continue
       fi
-      if ! permission=$(gh api "repos/$org/$repository/collaborators/${owner#@}/permission" --jq .permission); then
+      if ! permission_response=$(gh api "repos/$org/$repository/collaborators/${owner#@}/permission" --jq '[.user.login, .permission] | @tsv'); then
         bad "CODEOWNERS owner permission lookup failed: $owner"
+        valid=0
+        continue
+      fi
+      IFS=$'\t' read -r canonical_owner permission extra <<< "$permission_response"
+      if [[ -z "$canonical_owner" || -z "$permission" || -n "$extra" ]]; then
+        bad "CODEOWNERS owner permission response lacks canonical identity: $owner"
+        valid=0
+        continue
+      fi
+      if ! is_individual_codeowner "@$canonical_owner"; then
+        bad "CODEOWNERS owner permission response is not an individual identity: $owner"
         valid=0
         continue
       fi
@@ -109,8 +120,9 @@ verify_codeowners() {
           continue
           ;;
       esac
-      if [[ -z "${seen_owners[$owner]+set}" ]]; then
-        seen_owners["$owner"]=1
+      canonical_owner="${canonical_owner,,}"
+      if [[ -z "${seen_owners[$canonical_owner]+set}" ]]; then
+        seen_owners["$canonical_owner"]=1
         eligible_owner_count=$((eligible_owner_count + 1))
       fi
     done

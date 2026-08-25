@@ -11,6 +11,38 @@
 # - cross-model review runs privileged only after unprivileged gates, never executes PR code
 set -euo pipefail
 
+resolve_canonical_github_login() {
+  local requested_login="$1"
+  local output_variable="$2"
+  local canonical_login
+
+  if canonical_login="$(gh api "users/$requested_login" --jq .login)"; then
+    :
+  else
+    echo "Cannot resolve GitHub identity for @$requested_login."
+    return 1
+  fi
+  if [[ -z "$canonical_login" ]]; then
+    echo "GitHub returned no canonical login for @$requested_login."
+    return 1
+  fi
+  printf -v "$output_variable" '%s' "$canonical_login"
+}
+
+require_case_insensitively_distinct_identities() {
+  local actor="$1"
+  local reviewer="$2"
+
+  if [[ -z "$actor" || -z "$reviewer" ]]; then
+    echo "Bootstrap and gate-reviewer identities must both resolve to GitHub logins."
+    return 1
+  fi
+  if [[ "${actor,,}" == "${reviewer,,}" ]]; then
+    echo "--gate-reviewer must be a distinct GitHub identity from the bootstrap actor."
+    return 1
+  fi
+}
+
 has_eligible_codeowner_permission() {
   case "$1" in
     write|maintain|admin) return 0 ;;
@@ -125,6 +157,8 @@ else
   gh auth status >/dev/null 2>&1 || { echo "run: gh auth login"; exit 1; }
   ME="$(gh api user --jq .login)"
   [[ "$ME" != "$GATE_REVIEWER" ]] || { echo "--gate-reviewer must differ from the bootstrap/workflow initiator ($ME)."; exit 1; }
+  resolve_canonical_github_login "$GATE_REVIEWER" GATE_REVIEWER || exit 1
+  require_case_insensitively_distinct_identities "$ME" "$GATE_REVIEWER" || exit 1
   REVIEWER_ID="$(gh api "users/$GATE_REVIEWER" --jq .id)"
 fi
 
