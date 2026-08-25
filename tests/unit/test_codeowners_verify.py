@@ -1,5 +1,7 @@
 """Behavioral tests for canonical CODEOWNERS verification."""
 
+from pathlib import Path
+
 import pytest
 from codeowners_test_helpers import (
     FACTORY,
@@ -24,7 +26,7 @@ ELIGIBLE_PERMISSIONS = {
     ],
 )
 def test_valid_canonical_codeowners_with_two_eligible_distinct_owners_passes(
-    tmp_path,
+    tmp_path: Path,
     repository: str,
     paths: tuple[str, ...],
 ) -> None:
@@ -42,7 +44,7 @@ def test_valid_canonical_codeowners_with_two_eligible_distinct_owners_passes(
     ],
 )
 def test_each_expected_protected_path_rejects_a_single_owner(
-    tmp_path,
+    tmp_path: Path,
     repository: str,
     paths: tuple[str, ...],
     one_owner_path: str,
@@ -65,7 +67,7 @@ def test_each_expected_protected_path_rejects_a_single_owner(
     ],
 )
 def test_missing_expected_protected_path_fails(
-    tmp_path,
+    tmp_path: Path,
     repository: str,
     paths: tuple[str, ...],
 ) -> None:
@@ -87,7 +89,7 @@ def test_missing_expected_protected_path_fails(
     ],
 )
 def test_duplicate_expected_protected_path_fails(
-    tmp_path,
+    tmp_path: Path,
     repository: str,
     paths: tuple[str, ...],
 ) -> None:
@@ -102,7 +104,7 @@ def test_duplicate_expected_protected_path_fails(
 
 
 @pytest.mark.parametrize("owner", ["@missing", "@factory/maintainers", "owner-token"])
-def test_nonexistent_or_nonindividual_owner_fails(tmp_path, owner: str) -> None:
+def test_nonexistent_or_nonindividual_owner_fails(tmp_path: Path, owner: str) -> None:
     result = run_verify_codeowners(
         tmp_path,
         FACTORY,
@@ -114,7 +116,7 @@ def test_nonexistent_or_nonindividual_owner_fails(tmp_path, owner: str) -> None:
 
 
 @pytest.mark.parametrize("permission", ["read", "triage"])
-def test_insufficient_owner_permission_fails(tmp_path, permission: str) -> None:
+def test_insufficient_owner_permission_fails(tmp_path: Path, permission: str) -> None:
     result = run_verify_codeowners(
         tmp_path,
         FACTORY,
@@ -125,7 +127,7 @@ def test_insufficient_owner_permission_fails(tmp_path, permission: str) -> None:
     assert result.returncode != 0
 
 
-def test_missing_codeowners_or_permission_api_failure_fails_closed(tmp_path) -> None:
+def test_missing_codeowners_or_permission_api_failure_fails_closed(tmp_path: Path) -> None:
     missing_codeowners = run_verify_codeowners(
         tmp_path,
         FACTORY,
@@ -144,7 +146,7 @@ def test_missing_codeowners_or_permission_api_failure_fails_closed(tmp_path) -> 
     assert missing_permission.returncode != 0
 
 
-def test_missing_canonical_identity_in_permission_response_fails_closed(tmp_path) -> None:
+def test_missing_canonical_identity_in_permission_response_fails_closed(tmp_path: Path) -> None:
     result = run_verify_codeowners(
         tmp_path,
         FACTORY,
@@ -155,7 +157,7 @@ def test_missing_canonical_identity_in_permission_response_fails_closed(tmp_path
     assert result.returncode != 0
 
 
-def test_case_variant_codeowner_tokens_count_as_one_identity(tmp_path) -> None:
+def test_case_variant_codeowner_tokens_count_as_one_identity(tmp_path: Path) -> None:
     result = run_verify_codeowners(
         tmp_path,
         FACTORY,
@@ -170,7 +172,7 @@ def test_case_variant_codeowner_tokens_count_as_one_identity(tmp_path) -> None:
     assert result.returncode != 0
 
 
-def test_canonical_identity_casing_is_deduplicated(tmp_path) -> None:
+def test_canonical_identity_casing_is_deduplicated(tmp_path: Path) -> None:
     result = run_verify_codeowners(
         tmp_path,
         FACTORY,
@@ -185,7 +187,7 @@ def test_canonical_identity_casing_is_deduplicated(tmp_path) -> None:
     assert result.returncode != 0
 
 
-def test_different_canonical_eligible_identities_pass(tmp_path) -> None:
+def test_different_canonical_eligible_identities_pass(tmp_path: Path) -> None:
     result = run_verify_codeowners(
         tmp_path,
         FACTORY,
