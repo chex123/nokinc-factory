@@ -129,6 +129,22 @@ def test_transport_rejects_unsafe_redirects_without_forwarding_credentials(
     assert opener.requests[0].get_header("Authorization") == "Bearer token"
 
 
+def test_transport_rejects_redirect_to_explicit_port_zero_without_second_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opener = FakeOpener(_redirect("https://github.example.com:0/api/v3/redirected"))
+    monkeypatch.setattr(
+        "nokinc_factory.adapters.github_issues_transport.build_opener",
+        lambda handler: opener,
+    )
+    transport = UrllibGitHubTransport("token", api_url="https://github.example.com/api/v3")
+
+    with pytest.raises(GitHubApiError, match="port 0"):
+        transport.request("GET", "/issues/17", GitHubIssue)
+
+    assert len(opener.requests) == 1
+
+
 def test_transport_normalizes_malformed_utf8_to_provider_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

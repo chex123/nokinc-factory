@@ -111,6 +111,28 @@ def test_transport_fails_closed_for_empty_invalid_or_unowned_responses(
         UrllibGitHubTransport("token").request("GET", "/issues/17", GitHubIssue)
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_transport_rejects_non_standard_json_constants_in_extra_provider_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    constant: str,
+) -> None:
+    body = (
+        b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
+        b'"repository_url":"https://api.github.com/repos/acme/factory",'
+        b'"labels":[{"name":"stage:business-ready"}],"ignored":'
+        + constant.encode("ascii")
+        + b"}"
+    )
+    opener = FakeOpener(FakeResponse(body))
+    monkeypatch.setattr(
+        "nokinc_factory.adapters.github_issues_transport.build_opener",
+        lambda handler: opener,
+    )
+
+    with pytest.raises(GitHubApiError, match="invalid response"):
+        UrllibGitHubTransport("token").request("GET", "/issues/17", GitHubIssue)
+
+
 @pytest.mark.parametrize(
     ("error", "message"),
     [

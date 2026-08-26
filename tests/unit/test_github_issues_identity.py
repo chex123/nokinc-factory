@@ -141,6 +141,25 @@ def test_canonical_single_digit_issue_number_is_accepted() -> None:
     assert adapter.get_state("1") is WorkItemState.BUSINESS_READY
 
 
+@pytest.mark.parametrize(
+    "api_url",
+    [
+        "http://github.example.com/api/v3",
+        "https:///api/v3",
+        "https://" + "user" + ":" + "placeholder" + "@" + "github.example.com",
+        "https://github.example.com/api/v3?query=1",
+        "https://github.example.com/api/v3#fragment",
+    ],
+)
+def test_adapter_rejects_unsafe_api_url_before_injected_transport_requests(api_url: str) -> None:
+    transport = FakeTransport()
+
+    with pytest.raises(ValueError, match="api_url"):
+        GitHubIssuesAdapter("acme", "factory", "token", api_url=api_url, transport=transport)
+
+    assert transport.calls == []
+
+
 @pytest.mark.parametrize("work_item_id", ["0", "-1", "017", "+17", "17 ", "issue-17"])
 @pytest.mark.parametrize("operation", ["get_state", "apply", "comment"])
 def test_noncanonical_issue_ids_fail_before_any_request(

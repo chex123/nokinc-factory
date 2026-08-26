@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from email.message import Message
-from typing import IO, Protocol, TypeVar, cast
+from typing import IO, NoReturn, Protocol, TypeVar, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -25,6 +25,10 @@ _REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 
 class GitHubApiError(RuntimeError):
     """Raised when GitHub transport or provider data cannot be safely used."""
+
+
+class _NonStandardJsonConstant(ValueError):
+    """Raised when a provider response uses a non-RFC JSON numeric constant."""
 
 
 class GitHubTransport(Protocol):
@@ -152,10 +156,17 @@ def _parse_response[ParsedResponse: BaseModel](
         raise GitHubApiError("GitHub API returned an empty response")
     try:
         decoded_response = raw_response.decode("utf-8")
-        response_data = cast(JsonValue, json.loads(decoded_response))
+        response_data = cast(
+            JsonValue,
+            json.loads(decoded_response, parse_constant=_reject_non_standard_json_constant),
+        )
         return response_model.model_validate(response_data)
-    except (UnicodeError, json.JSONDecodeError, ValidationError) as exc:
+    except (UnicodeError, json.JSONDecodeError, ValidationError, _NonStandardJsonConstant) as exc:
         raise GitHubApiError("GitHub API returned an invalid response") from exc
+
+
+def _reject_non_standard_json_constant(value: str) -> NoReturn:
+    raise _NonStandardJsonConstant(f"non-standard JSON constant: {value}")
 
 
 def _validate_api_url(api_url: str) -> tuple[str, _Origin]:
@@ -163,6 +174,16 @@ def _validate_api_url(api_url: str) -> tuple[str, _Origin]:
     if url_parts.query or url_parts.fragment:
         raise ValueError("api_url must not contain a query or fragment")
     return api_url.rstrip("/"), _origin_from_parts(url_parts)
+
+
+def normalize_github_api_url(api_url: str) -> str:
+    """Validate a GitHub API base URL before any authenticated use.
+
+    Adapters validate this even when a test or alternate transport is injected,
+    so an unsafe endpoint cannot be reached merely by bypassing urllib.
+    """
+    normalized_api_url, _ = _validate_api_url(api_url)
+    return normalized_api_url
 
 
 def _validate_https_url(url: str, *, subject: str) -> SplitResult:
@@ -174,16 +195,18 @@ def _validate_https_url(url: str, *, subject: str) -> SplitResult:
     if url_parts.username is not None or url_parts.password is not None:
         raise ValueError(f"{subject} must not include embedded credentials")
     try:
-        _origin_from_parts(url_parts)
+        origin = _origin_from_parts(url_parts)
     except ValueError as exc:
         raise ValueError(f"{subject} has an invalid port") from exc
+    if origin.port == 0:
+        raise ValueError(f"{subject} must not use port 0")
     return url_parts
 
 
 def _origin_from_parts(url_parts: SplitResult) -> _Origin:
     if url_parts.hostname is None:
         raise ValueError("URL has no hostname")
-    port = url_parts.port or 443
+    port = 443 if url_parts.port is None else url_parts.port
     return _Origin(
         scheme=url_parts.scheme.lower(),
         hostname=url_parts.hostname.lower(),

@@ -42,6 +42,7 @@ from nokinc_factory.adapters.github_issues_transport import (
     GitHubApiError,
     GitHubTransport,
     UrllibGitHubTransport,
+    normalize_github_api_url,
 )
 from nokinc_factory.domain.states import Transition, WorkItemState
 from nokinc_factory.domain.story import BusinessReady, SolutionReady
@@ -99,7 +100,8 @@ class GitHubIssuesAdapter(WorkItemPort):
     ) -> None:
         if not owner or not repository:
             raise ValueError("GitHub owner and repository must not be empty")
-        api_parts = urlsplit(api_url)
+        normalized_api_url = normalize_github_api_url(api_url)
+        api_parts = urlsplit(normalized_api_url)
         api_host = api_parts.hostname
         if api_host is None:
             raise ValueError("GitHub api_url must include a hostname")
@@ -109,7 +111,7 @@ class GitHubIssuesAdapter(WorkItemPort):
             f"/repos/{quote(owner, safe='')}/{quote(repository, safe='')}/issues"
         )
         self._repository_url = (
-            f"{api_url.rstrip('/')}/repos/{quote(owner, safe='')}/{quote(repository, safe='')}"
+            f"{normalized_api_url}/repos/{quote(owner, safe='')}/{quote(repository, safe='')}"
         )
         self._web_host = (
             "github.com" if api_host.casefold() == "api.github.com" else api_host.casefold()
@@ -117,7 +119,7 @@ class GitHubIssuesAdapter(WorkItemPort):
         self._web_issue_path = f"/{quote(owner, safe='')}/{quote(repository, safe='')}"
         self._transport = transport or UrllibGitHubTransport(
             token,
-            api_url=api_url,
+            api_url=normalized_api_url,
             timeout=timeout,
         )
 
