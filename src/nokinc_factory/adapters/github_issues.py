@@ -2,19 +2,37 @@
 
 GitHub Issues is the MVP ALM system: the ALM owns the business lifecycle and
 human history, and this adapter observes and advances that lifecycle through
-labels. Labels cannot provide approval identity, separation of duties, or
-immutable approval evidence.
+labels. GitHub Issues has no provider-side conditional write for label changes,
+so this adapter implements a verified optimistic transition: read and validate,
+mutate lifecycle labels individually, then re-read and require the authoritative
+target state. It surfaces divergence fail closed for an external reconciler or
+human path; it does not perform reconciliation itself. It is not atomic
+compare-and-swap.
+
+Labels cannot provide approval identity, separation of duties, or immutable
+approval evidence. See Spec Part 1 and Part 11.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import Protocol, cast
+from typing import Protocol, TypeVar, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from pydantic import BaseModel, ValidationError
+
+from nokinc_factory.adapters.github_issues_models import (
+    CreateDesignPayload,
+    CreateStoryPayload,
+    GitHubCommentPayload,
+    GitHubCommentResponse,
+    GitHubIssue,
+    GitHubLabel,
+    LifecycleLabelMutationPayload,
+    LifecycleLabelMutationResponse,
+)
 from nokinc_factory.domain.states import Transition, WorkItemState
 from nokinc_factory.domain.story import BusinessReady, SolutionReady
 from nokinc_factory.ports.work_item import (
@@ -23,7 +41,8 @@ from nokinc_factory.ports.work_item import (
     WorkItemRef,
 )
 
-JsonObject = dict[str, object]
+ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
+JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
 
 class GitHubApiError(RuntimeError):
@@ -37,8 +56,14 @@ class InvalidLifecycleLabel(ValueError):
 class GitHubTransport(Protocol):
     """Small JSON transport boundary that keeps HTTP out of adapter behavior tests."""
 
-    def request(self, method: str, path: str, body: JsonObject | None = None) -> object:
-        """Send one GitHub API request and return its decoded JSON response."""
+    def request(
+        self,
+        method: str,
+        path: str,
+        response_model: type[ResponseModel],
+        body: BaseModel | None = None,
+    ) -> ResponseModel:
+        """Send one request and validate its response at the provider boundary."""
         ...
 
 
@@ -60,8 +85,14 @@ class UrllibGitHubTransport:
         self._api_url = api_url.rstrip("/")
         self._timeout = timeout
 
-    def request(self, method: str, path: str, body: JsonObject | None = None) -> object:
-        encoded_body = None if body is None else json.dumps(body).encode("utf-8")
+    def request(
+        self,
+        method: str,
+        path: str,
+        response_model: type[ResponseModel],
+        body: BaseModel | None = None,
+    ) -> ResponseModel:
+        encoded_body = None if body is None else body.model_dump_json().encode("utf-8")
         request = Request(
             f"{self._api_url}{path}",
             data=encoded_body,
@@ -83,44 +114,51 @@ class UrllibGitHubTransport:
             raise GitHubApiError("GitHub API request failed") from exc
 
         if not raw_response:
-            return {}
+            raise GitHubApiError("GitHub API returned an empty response")
         try:
-            return cast(object, json.loads(raw_response))
-        except json.JSONDecodeError as exc:
-            raise GitHubApiError("GitHub API returned invalid JSON") from exc
+            decoded_response = cast(JsonValue, json.loads(raw_response))
+            return response_model.model_validate(decoded_response)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise GitHubApiError("GitHub API returned an invalid response") from exc
 
 
 _STATE_LABELS: dict[str, WorkItemState] = {
     f"stage:{state.value.lower().replace('_', '-')}": state for state in WorkItemState
 }
+_GATE_CONTROL_LABELS: frozenset[str] = frozenset(
+    {
+        "stage:gate-1-approved",
+        "stage:gate-2-approved",
+        "stage:gate-3-approved",
+        "stage:gate-4-approved",
+    }
+)
+_PERMITTED_STAGE_LABELS: frozenset[str] = frozenset(_STATE_LABELS) | _GATE_CONTROL_LABELS
 
 
 def _state_label(state: WorkItemState) -> str:
     return f"stage:{state.value.lower().replace('_', '-')}"
 
 
-def _as_issue(response: object) -> Mapping[str, object]:
-    if not isinstance(response, Mapping):
-        raise GitHubApiError("GitHub API returned a non-object issue response")
-    return response
+def _label_names(labels: list[GitHubLabel]) -> list[str]:
+    return [label.name for label in labels]
 
 
-def _label_names(issue: Mapping[str, object]) -> list[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
-        raise GitHubApiError("GitHub issue response has invalid labels")
-
-    names: list[str] = []
-    for label in labels:
-        if not isinstance(label, Mapping) or not isinstance(label.get("name"), str):
-            raise GitHubApiError("GitHub issue response has an invalid label")
-        names.append(label["name"])
-    return names
+def _validate_stage_namespace(labels: list[GitHubLabel]) -> None:
+    unknown_stage_labels = sorted(
+        {label.name for label in labels if label.name.startswith("stage:")}
+        - _PERMITTED_STAGE_LABELS
+    )
+    if unknown_stage_labels:
+        raise InvalidLifecycleLabel(
+            f"GitHub issue has unknown stage label(s): {', '.join(unknown_stage_labels)}"
+        )
 
 
-def _lifecycle_state(issue: Mapping[str, object]) -> WorkItemState:
-    state_labels = [label for label in _label_names(issue) if label in _STATE_LABELS]
-    if len(state_labels) != 1 or state_labels[0] not in _STATE_LABELS:
+def _lifecycle_state(issue: GitHubIssue) -> WorkItemState:
+    _validate_stage_namespace(issue.labels)
+    state_labels = [label for label in _label_names(issue.labels) if label in _STATE_LABELS]
+    if len(state_labels) != 1:
         raise InvalidLifecycleLabel(
             "GitHub issue must have exactly one known lifecycle label"
         )
@@ -128,7 +166,7 @@ def _lifecycle_state(issue: Mapping[str, object]) -> WorkItemState:
 
 
 def _require_lifecycle_state(
-    issue: Mapping[str, object],
+    issue: GitHubIssue,
     expected_state: WorkItemState,
     *,
     response_name: str,
@@ -148,14 +186,29 @@ def _require_lifecycle_state(
     return actual_state
 
 
-def _issue_ref(issue: Mapping[str, object], state: WorkItemState) -> WorkItemRef:
-    number = issue.get("number")
-    url = issue.get("html_url")
-    if isinstance(number, bool) or not isinstance(number, (int, str)) or not str(number):
-        raise GitHubApiError("GitHub issue response has no valid issue number")
-    if not isinstance(url, str) or not url:
-        raise GitHubApiError("GitHub issue response has no valid issue URL")
-    return WorkItemRef(id=str(number), url=url, state=state)
+def _issue_ref(issue: GitHubIssue, state: WorkItemState) -> WorkItemRef:
+    return WorkItemRef(id=str(issue.number), url=issue.html_url, state=state)
+
+
+def _require_mutation_lifecycle_labels(
+    response: LifecycleLabelMutationResponse,
+    expected_labels: frozenset[str],
+    *,
+    response_name: str,
+) -> None:
+    _validate_stage_namespace(response.root)
+    lifecycle_labels = [label for label in _label_names(response.root) if label in _STATE_LABELS]
+    actual_labels = frozenset(lifecycle_labels)
+    missing_labels = expected_labels - actual_labels
+    if missing_labels:
+        raise GitHubApiError(
+            f"GitHub {response_name} is missing target lifecycle label(s): "
+            f"{', '.join(sorted(missing_labels))}"
+        )
+    if len(lifecycle_labels) != len(expected_labels) or actual_labels != expected_labels:
+        raise GitHubApiError(
+            f"GitHub {response_name} has unexpected lifecycle labels"
+        )
 
 
 class GitHubIssuesAdapter(WorkItemPort):
@@ -191,16 +244,15 @@ class GitHubIssuesAdapter(WorkItemPort):
         )
 
     def create_story(self, story: BusinessReady) -> WorkItemRef:
-        issue = _as_issue(
-            self._transport.request(
-                "POST",
-                self._issues_path,
-                {
-                    "title": f"[STORY] {story.work_item_id}",
-                    "body": story.model_dump_json(indent=2),
-                    "labels": ["story", _state_label(WorkItemState.BUSINESS_READY)],
-                },
-            )
+        issue = self._transport.request(
+            "POST",
+            self._issues_path,
+            GitHubIssue,
+            CreateStoryPayload(
+                title=f"[STORY] {story.work_item_id}",
+                body=story.model_dump_json(indent=2),
+                labels=["story", _state_label(WorkItemState.BUSINESS_READY)],
+            ),
         )
         actual_state = _require_lifecycle_state(
             issue,
@@ -211,16 +263,15 @@ class GitHubIssuesAdapter(WorkItemPort):
         return _issue_ref(issue, actual_state)
 
     def create_design(self, design: SolutionReady) -> WorkItemRef:
-        issue = _as_issue(
-            self._transport.request(
-                "POST",
-                self._issues_path,
-                {
-                    "title": f"[DESIGN] {design.work_item_id}",
-                    "body": design.model_dump_json(indent=2),
-                    "labels": ["design", _state_label(WorkItemState.SOLUTION_READY)],
-                },
-            )
+        issue = self._transport.request(
+            "POST",
+            self._issues_path,
+            GitHubIssue,
+            CreateDesignPayload(
+                title=f"[DESIGN] {design.work_item_id}",
+                body=design.model_dump_json(indent=2),
+                labels=["design", _state_label(WorkItemState.SOLUTION_READY)],
+            ),
         )
         actual_state = _require_lifecycle_state(
             issue,
@@ -235,29 +286,45 @@ class GitHubIssuesAdapter(WorkItemPort):
         return _lifecycle_state(self._get_issue(work_item_id))
 
     def apply(self, transition: Transition) -> WorkItemRef:
-        """Optimistically update and verify an ALM lifecycle transition.
+        """Perform a verified optimistic ALM lifecycle transition.
 
-        GitHub Issue PATCH has no provider-side conditional-write primitive.
-        The adapter therefore checks the expected state before mutation and
-        verifies the returned issue's lifecycle label after mutation.
+        GitHub label mutation has no atomic provider-side CAS. The adapter checks
+        the expected state before individual label mutations, then re-reads the
+        authoritative issue. Divergence fails closed for an external reconciler
+        or human path; this adapter does not reconcile it itself.
         """
         issue = self._get_issue(transition.work_item_id)
         current_state = _lifecycle_state(issue)
         transition.validate_against(current_state)
 
-        labels = [label for label in _label_names(issue) if label not in _STATE_LABELS]
-        labels.append(_state_label(transition.target))
-        updated_issue = _as_issue(
-            self._transport.request(
-                "PATCH",
-                self._issue_path(transition.work_item_id),
-                {"labels": labels},
-            )
+        current_label = _state_label(current_state)
+        target_label = _state_label(transition.target)
+        added_labels = self._transport.request(
+            "POST",
+            f"{self._issue_path(transition.work_item_id)}/labels",
+            LifecycleLabelMutationResponse,
+            LifecycleLabelMutationPayload(labels=[target_label]),
         )
+        _require_mutation_lifecycle_labels(
+            added_labels,
+            frozenset({current_label, target_label}),
+            response_name="label addition response",
+        )
+        removed_labels = self._transport.request(
+            "DELETE",
+            f"{self._issue_path(transition.work_item_id)}/labels/{quote(current_label, safe='')}",
+            LifecycleLabelMutationResponse,
+        )
+        _require_mutation_lifecycle_labels(
+            removed_labels,
+            frozenset({target_label}),
+            response_name="label removal response",
+        )
+        updated_issue = self._get_issue(transition.work_item_id)
         actual_state = _require_lifecycle_state(
             updated_issue,
             transition.target,
-            response_name="PATCH response",
+            response_name="authoritative reread",
             expectation_name="requested target",
         )
         return _issue_ref(updated_issue, actual_state)
@@ -266,11 +333,12 @@ class GitHubIssuesAdapter(WorkItemPort):
         self._transport.request(
             "POST",
             f"{self._issue_path(work_item_id)}/comments",
-            {"body": body},
+            GitHubCommentResponse,
+            GitHubCommentPayload(body=body),
         )
 
-    def _get_issue(self, work_item_id: str) -> Mapping[str, object]:
-        return _as_issue(self._transport.request("GET", self._issue_path(work_item_id)))
+    def _get_issue(self, work_item_id: str) -> GitHubIssue:
+        return self._transport.request("GET", self._issue_path(work_item_id), GitHubIssue)
 
     def _issue_path(self, work_item_id: str) -> str:
         return f"{self._issues_path}/{quote(work_item_id, safe='')}"
