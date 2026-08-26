@@ -145,18 +145,19 @@ verify_codeowners() {
 verify_branch_protection() {
   local org="$1"
   local repository="$2"
-  local protection_response status_contexts required_context
+  local protection_response status_contexts encoded_context decoded_context required_context
   local strict contexts enforce_admins dismiss_stale_reviews code_owner_reviews
   local last_push_approval approval_count conversation_resolution force_pushes deletions
   local required_approvals=2
   local -a fields configured_contexts
+  local -A configured_context_set=()
   local valid=1
 
   [[ "$repository" == "$FACTORY" ]] && required_approvals=1
 
   if ! protection_response=$(gh api "repos/$org/$repository/branches/$PROTECTED_BRANCH/protection" --jq '[
     (.required_status_checks.strict | tostring),
-    (.required_status_checks.contexts | if type == "array" then map(tostring) | join("\u001f") else "null" end),
+    (.required_status_checks.contexts | if type == "array" then map(tostring | @base64) | join("\u001f") else "null" end),
     (.enforce_admins.enabled | tostring),
     (.required_pull_request_reviews.dismiss_stale_reviews | tostring),
     (.required_pull_request_reviews.require_code_owner_reviews | tostring),
@@ -189,8 +190,27 @@ verify_branch_protection() {
 
   [[ "$strict" == "true" ]] && ok "strict status checks" || { bad "strict status checks disabled"; valid=0; }
   IFS=$'\037' read -r -a configured_contexts <<< "$contexts"
+  for encoded_context in "${configured_contexts[@]}"; do
+    if ! decoded_context=$(
+      if ! printf '%s' "$encoded_context" | base64 --decode 2>/dev/null; then
+        exit 1
+      fi
+      printf '\034'
+    ); then
+      bad "status context base64 decoding failed"
+      valid=0
+      continue
+    fi
+    decoded_context="${decoded_context%$'\034'}"
+    if [[ -z "$decoded_context" ]]; then
+      bad "status context base64 decoding produced an empty identity"
+      valid=0
+      continue
+    fi
+    configured_context_set["$decoded_context"]=1
+  done
   for required_context in "${REQUIRED_STATUS_CONTEXTS[@]}"; do
-    if [[ ! " ${configured_contexts[*]} " == *" $required_context "* ]]; then
+    if [[ -z "${configured_context_set[$required_context]+set}" ]]; then
       bad "missing required status: $required_context"
       valid=0
     fi

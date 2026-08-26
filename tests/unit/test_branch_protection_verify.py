@@ -1,5 +1,6 @@
 """Behavioral tests for protected-branch governance verification."""
 
+import base64
 import json
 import re
 from dataclasses import replace
@@ -8,9 +9,11 @@ from typing import cast
 
 import pytest
 from branch_protection_test_helpers import (
+    REQUIRED_STATUS_CONTEXTS,
     BranchProtection,
     branch_protection,
     run_verify_branch_protection,
+    serialize_branch_protection,
 )
 from codeowners_test_helpers import FACTORY, ROOT, TARGET
 
@@ -22,11 +25,17 @@ def _jq_filter_serialized_protection(protection: BranchProtection) -> str:
     end = source.index("\nif [[", start)
     literals = re.findall(r'join\(("(?:\\.|[^"\\])*")\)', source[start:end])
     assert len(literals) == 2
+    assert "map(tostring | @base64) | join(" in source[start:end]
     context_separator, record_separator = (cast(str, json.loads(literal)) for literal in literals)
     assert context_separator == "\x1f"
     assert record_separator == "\x1e"
     contexts = (
-        "null" if protection.contexts is None else context_separator.join(protection.contexts)
+        "null"
+        if protection.contexts is None
+        else context_separator.join(
+            _base64_context(context)
+            for context in protection.contexts
+        )
     )
     fields = (
         protection.strict,
@@ -51,6 +60,10 @@ def _jq_tostring(value: bool | int | str | None) -> str:
     return str(value)
 
 
+def _base64_context(context: str) -> str:
+    return base64.b64encode(context.encode("utf-8")).decode("ascii")
+
+
 @pytest.mark.parametrize(
     ("repository", "approval_count"),
     [
@@ -72,6 +85,47 @@ def test_complete_branch_protection_contract_passes(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_exact_required_status_contexts_pass(tmp_path: Path) -> None:
+    protection = replace(branch_protection(), contexts=REQUIRED_STATUS_CONTEXTS)
+    result = run_verify_branch_protection(tmp_path, FACTORY, protection)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_combined_status_context_does_not_satisfy_required_contexts(tmp_path: Path) -> None:
+    protection = replace(
+        branch_protection(),
+        contexts=("deterministic-gates frozen-contract baseline-assertion cross-model-review",),
+    )
+    result = run_verify_branch_protection(tmp_path, FACTORY, protection)
+
+    assert result.returncode != 0
+
+
+@pytest.mark.parametrize(
+    "non_exact_context",
+    ["deterministic-gates-extra", "extra-deterministic-gates"],
+)
+def test_status_context_requires_exact_identity(tmp_path: Path, non_exact_context: str) -> None:
+    protection = replace(
+        branch_protection(),
+        contexts=(non_exact_context, *REQUIRED_STATUS_CONTEXTS[1:]),
+    )
+    result = run_verify_branch_protection(tmp_path, FACTORY, protection)
+
+    assert result.returncode != 0
+
+
+def test_duplicate_valid_status_contexts_pass(tmp_path: Path) -> None:
+    protection = replace(
+        branch_protection(),
+        contexts=(*REQUIRED_STATUS_CONTEXTS, "deterministic-gates", "cross-model-review"),
+    )
+    result = run_verify_branch_protection(tmp_path, FACTORY, protection)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_jq_serialization_uses_control_separators_consumed_by_bash(tmp_path: Path) -> None:
     protection = branch_protection()
     result = run_verify_branch_protection(
@@ -82,6 +136,58 @@ def test_jq_serialization_uses_control_separators_consumed_by_bash(tmp_path: Pat
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_unit_separator_inside_one_context_does_not_create_required_contexts(
+    tmp_path: Path,
+) -> None:
+    protection = replace(
+        branch_protection(),
+        contexts=("\x1f".join(REQUIRED_STATUS_CONTEXTS),),
+    )
+    result = run_verify_branch_protection(
+        tmp_path,
+        FACTORY,
+        protection,
+        serialized_response=_jq_filter_serialized_protection(protection),
+    )
+
+    assert result.returncode != 0
+
+
+def test_record_separator_inside_context_cannot_corrupt_outer_parser(tmp_path: Path) -> None:
+    protection = replace(
+        branch_protection(),
+        contexts=(*REQUIRED_STATUS_CONTEXTS, "audit\x1econtrol"),
+    )
+    result = run_verify_branch_protection(
+        tmp_path,
+        FACTORY,
+        protection,
+        serialized_response=_jq_filter_serialized_protection(protection),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_invalid_base64_context_serialization_fails_closed(tmp_path: Path) -> None:
+    invalid_contexts = "\x1f".join(
+        [
+            *(_base64_context(context) for context in REQUIRED_STATUS_CONTEXTS),
+            "not-base64!",
+        ]
+    )
+    result = run_verify_branch_protection(
+        tmp_path,
+        FACTORY,
+        branch_protection(),
+        serialized_response=serialize_branch_protection(
+            branch_protection(),
+            encoded_contexts=invalid_contexts,
+        ),
+    )
+
+    assert result.returncode != 0
 
 
 @pytest.mark.parametrize(

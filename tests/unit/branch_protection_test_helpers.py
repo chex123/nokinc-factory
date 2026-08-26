@@ -1,5 +1,6 @@
 """Shared subprocess fixtures for protected-branch governance tests."""
 
+import base64
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -53,7 +54,11 @@ def run_verify_branch_protection(
     serialized_response: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     protection_path = f"repos/test-org/{repository}/branches/main/protection"
-    protection_response = serialized_response or _branch_protection_response(protection)
+    protection_response = (
+        serialize_branch_protection(protection)
+        if serialized_response is None
+        else serialized_response
+    )
     fake_gh = tmp_path / "gh"
     fake_gh.write_text(
         f"""#!/usr/bin/env bash
@@ -79,11 +84,23 @@ verify_branch_protection test-org {shlex.quote(repository)}
     )
 
 
-def _branch_protection_response(protection: BranchProtection) -> str:
-    contexts = "null" if protection.contexts is None else "\x1f".join(protection.contexts)
+def serialize_branch_protection(
+    protection: BranchProtection,
+    *,
+    encoded_contexts: str | None = None,
+) -> str:
+    if encoded_contexts is None:
+        encoded_contexts = (
+            "null"
+            if protection.contexts is None
+            else "\x1f".join(
+                base64.b64encode(context.encode("utf-8")).decode("ascii")
+                for context in protection.contexts
+            )
+        )
     fields = (
         protection.strict,
-        contexts,
+        encoded_contexts,
         protection.enforce_admins,
         protection.dismiss_stale_reviews,
         protection.require_code_owner_reviews,
