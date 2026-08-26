@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# Governance verifier for bootstrap-established GitHub controls.
+#
+# Why: T2 authorization depends on verified identity, separation of duties,
+# and independently enforced review. This script verifies canonical distinct
+# CODEOWNER identities and protected-branch controls. Missing, malformed, or
+# drifted governance evidence fails closed; otherwise the Factory could report
+# governance healthy while review or authorization controls are bypassable.
+#
+# Spec: docs/factory-spec.md Part 1 (State, Approval and Reconciliation) and
+# Part 7 (The Agents / Cross-Model Review).
 set -euo pipefail
 FACTORY="nokinc-factory"
 PROTECTED_BRANCH="main"
