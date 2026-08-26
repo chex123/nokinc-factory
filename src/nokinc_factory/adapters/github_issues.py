@@ -15,13 +15,7 @@ approval evidence. See Spec Part 1 and Part 11.
 
 from __future__ import annotations
 
-import json
-from typing import Protocol, TypeVar, cast
-from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
-
-from pydantic import BaseModel, ValidationError
 
 from nokinc_factory.adapters.github_issues_models import (
     CreateDesignPayload,
@@ -33,6 +27,11 @@ from nokinc_factory.adapters.github_issues_models import (
     LifecycleLabelMutationPayload,
     LifecycleLabelMutationResponse,
 )
+from nokinc_factory.adapters.github_issues_transport import (
+    GitHubApiError,
+    GitHubTransport,
+    UrllibGitHubTransport,
+)
 from nokinc_factory.domain.states import Transition, WorkItemState
 from nokinc_factory.domain.story import BusinessReady, SolutionReady
 from nokinc_factory.ports.work_item import (
@@ -41,85 +40,9 @@ from nokinc_factory.ports.work_item import (
     WorkItemRef,
 )
 
-ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
-JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
-
-
-class GitHubApiError(RuntimeError):
-    """Raised when GitHub returns an unusable response or transport error."""
-
 
 class InvalidLifecycleLabel(ValueError):
     """Raised when an issue does not have exactly one known state label."""
-
-
-class GitHubTransport(Protocol):
-    """Small JSON transport boundary that keeps HTTP out of adapter behavior tests."""
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        response_model: type[ResponseModel],
-        body: BaseModel | None = None,
-    ) -> ResponseModel:
-        """Send one request and validate its response at the provider boundary."""
-        ...
-
-
-class UrllibGitHubTransport:
-    """Minimal GitHub REST transport using the Python standard library."""
-
-    def __init__(
-        self,
-        token: str,
-        *,
-        api_url: str = "https://api.github.com",
-        timeout: float = 30.0,
-    ) -> None:
-        if not token:
-            raise ValueError("GitHub token must not be empty")
-        if timeout <= 0:
-            raise ValueError("GitHub request timeout must be positive")
-        self._token = token
-        self._api_url = api_url.rstrip("/")
-        self._timeout = timeout
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        response_model: type[ResponseModel],
-        body: BaseModel | None = None,
-    ) -> ResponseModel:
-        encoded_body = None if body is None else body.model_dump_json().encode("utf-8")
-        request = Request(
-            f"{self._api_url}{path}",
-            data=encoded_body,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self._token}",
-                "Content-Type": "application/json",
-                "User-Agent": "nokinc-factory",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            method=method,
-        )
-        try:
-            with urlopen(request, timeout=self._timeout) as response:
-                raw_response = response.read()
-        except HTTPError as exc:
-            raise GitHubApiError(f"GitHub API request failed with status {exc.code}") from exc
-        except URLError as exc:
-            raise GitHubApiError("GitHub API request failed") from exc
-
-        if not raw_response:
-            raise GitHubApiError("GitHub API returned an empty response")
-        try:
-            decoded_response = cast(JsonValue, json.loads(raw_response))
-            return response_model.model_validate(decoded_response)
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise GitHubApiError("GitHub API returned an invalid response") from exc
 
 
 _STATE_LABELS: dict[str, WorkItemState] = {
@@ -187,7 +110,7 @@ def _require_lifecycle_state(
 
 
 def _issue_ref(issue: GitHubIssue, state: WorkItemState) -> WorkItemRef:
-    return WorkItemRef(id=str(issue.number), url=issue.html_url, state=state)
+    return WorkItemRef(id=str(issue.number), url=str(issue.html_url), state=state)
 
 
 def _require_mutation_lifecycle_labels(

@@ -7,7 +7,7 @@ Part 1.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel, field_validator
 
 
 class GitHubLabel(BaseModel):
@@ -24,8 +24,15 @@ class GitHubIssue(BaseModel):
     model_config = ConfigDict(strict=True, extra="ignore")
 
     number: int = Field(gt=0)
-    html_url: str = Field(min_length=1)
+    html_url: AnyUrl
     labels: list[GitHubLabel]
+
+    @field_validator("html_url")
+    @classmethod
+    def _require_https_web_url(cls, value: AnyUrl) -> AnyUrl:
+        if value.scheme != "https" or value.host is None:
+            raise ValueError("html_url must be an absolute HTTPS URL")
+        return value
 
 
 class CreateStoryPayload(BaseModel):

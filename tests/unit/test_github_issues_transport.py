@@ -32,6 +32,17 @@ class FakeResponse:
         return self._body
 
 
+class FakeOpener:
+    def __init__(self, *responses: FakeResponse | Exception) -> None:
+        self._responses = list(responses)
+
+    def open(self, request: object, *, timeout: float) -> FakeResponse:
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
 def _story_payload() -> CreateStoryPayload:
     return CreateStoryPayload(
         title="[STORY] story-1",
@@ -45,14 +56,21 @@ def test_transport_serializes_owned_payload_and_validates_issue_response(
 ) -> None:
     requests: list[object] = []
 
-    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
-        requests.append((request, timeout))
-        return FakeResponse(
+    class RecordingOpener(FakeOpener):
+        def open(self, request: object, *, timeout: float) -> FakeResponse:
+            requests.append((request, timeout))
+            return super().open(request, timeout=timeout)
+
+    opener = RecordingOpener(
+        FakeResponse(
             b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
             b'"labels":[{"name":"stage:business-ready"}]}'
         )
-
-    monkeypatch.setattr("nokinc_factory.adapters.github_issues.urlopen", fake_urlopen)
+    )
+    monkeypatch.setattr(
+        "nokinc_factory.adapters.github_issues_transport.build_opener",
+        lambda handler: opener,
+    )
     transport = UrllibGitHubTransport("token", api_url="https://github.test/", timeout=5.0)
 
     issue = transport.request("POST", "/issues", GitHubIssue, _story_payload())
@@ -82,9 +100,10 @@ def test_transport_fails_closed_for_empty_invalid_or_unowned_responses(
     monkeypatch: pytest.MonkeyPatch,
     body: bytes,
 ) -> None:
+    opener = FakeOpener(FakeResponse(body))
     monkeypatch.setattr(
-        "nokinc_factory.adapters.github_issues.urlopen",
-        lambda request, timeout: FakeResponse(body),
+        "nokinc_factory.adapters.github_issues_transport.build_opener",
+        lambda handler: opener,
     )
 
     with pytest.raises(GitHubApiError, match="response"):
@@ -103,10 +122,11 @@ def test_transport_wraps_network_errors(
     error: Exception,
     message: str,
 ) -> None:
-    def fail_urlopen(request: object, timeout: float) -> FakeResponse:
-        raise error
-
-    monkeypatch.setattr("nokinc_factory.adapters.github_issues.urlopen", fail_urlopen)
+    opener = FakeOpener(error)
+    monkeypatch.setattr(
+        "nokinc_factory.adapters.github_issues_transport.build_opener",
+        lambda handler: opener,
+    )
 
     with pytest.raises(GitHubApiError, match=message):
         UrllibGitHubTransport("token").request("GET", "/issues/17", GitHubIssue)
