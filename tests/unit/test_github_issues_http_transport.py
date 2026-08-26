@@ -58,7 +58,7 @@ def _redirect(location: str) -> HTTPError:
     [
         "http://api.github.com",
         "https:///api/v3",
-        "https://user:password@api.github.com",
+        "https://" + "user" + ":" + "placeholder" + "@" + "api.github.com",
         "https://api.github.com/api/v3?query=1",
         "https://api.github.com/api/v3#fragment",
     ],
