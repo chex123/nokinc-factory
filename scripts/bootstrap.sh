@@ -11,6 +11,97 @@
 # - cross-model review runs privileged only after unprivileged gates, never executes PR code
 set -euo pipefail
 
+resolve_canonical_github_login() {
+  local requested_login="$1"
+  local output_variable="$2"
+  local canonical_login
+
+  if canonical_login="$(gh api "users/$requested_login" --jq .login)"; then
+    :
+  else
+    echo "Cannot resolve GitHub identity for @$requested_login."
+    return 1
+  fi
+  if [[ -z "$canonical_login" ]]; then
+    echo "GitHub returned no canonical login for @$requested_login."
+    return 1
+  fi
+  printf -v "$output_variable" '%s' "$canonical_login"
+}
+
+require_case_insensitively_distinct_identities() {
+  local actor="$1"
+  local reviewer="$2"
+
+  if [[ -z "$actor" || -z "$reviewer" ]]; then
+    echo "Bootstrap and gate-reviewer identities must both resolve to GitHub logins."
+    return 1
+  fi
+  if [[ "${actor,,}" == "${reviewer,,}" ]]; then
+    echo "--gate-reviewer must be a distinct GitHub identity from the bootstrap actor."
+    return 1
+  fi
+}
+
+has_eligible_codeowner_permission() {
+  case "$1" in
+    write|maintain|admin) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+require_eligible_codeowner() {
+  local org="$1"
+  local repository="$2"
+  local owner="$3"
+  local permission
+
+  if ! permission="$(gh api "repos/$org/$repository/collaborators/$owner/permission" --jq .permission)"; then
+    echo "Cannot verify generated CODEOWNER @$owner on $org/$repository."
+    echo "Each generated CODEOWNER must have write, maintain, or admin permission."
+    return 1
+  fi
+  if ! has_eligible_codeowner_permission "$permission"; then
+    echo "Generated CODEOWNER @$owner has $permission permission on $org/$repository."
+    echo "Each generated CODEOWNER must have write, maintain, or admin permission."
+    return 1
+  fi
+}
+
+verify_generated_codeowner_permissions() {
+  local org="$1"
+  shift
+  local repository owner
+
+  for repository in "$@"; do
+    for owner in "$ME" "$GATE_REVIEWER"; do
+      require_eligible_codeowner "$org" "$repository" "$owner" || return 1
+    done
+  done
+}
+
+write_factory_codeowners() {
+  local destination="$1"
+  local owner="$2"
+  local reviewer="$3"
+
+  printf '/tests/acceptance/ @%s @%s\n/docs/factory-spec.md @%s @%s\n/.github/ @%s @%s\n' \
+    "$owner" "$reviewer" "$owner" "$reviewer" "$owner" "$reviewer" > "$destination"
+}
+
+write_target_codeowners() {
+  local destination="$1"
+  local owner="$2"
+  local reviewer="$3"
+
+  printf '/tests/acceptance/ @%s @%s\n/tests/contract/ @%s @%s\n/tests/regression/ @%s @%s\n/.github/ @%s @%s\n' \
+    "$owner" "$reviewer" "$owner" "$reviewer" "$owner" "$reviewer" "$owner" "$reviewer" > "$destination"
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 ORG="${1:?usage: bootstrap.sh <github-org> --gate-reviewer <github-login> [--all] [--dry-run] [--factory-public]}"
 shift
 DRY=0
@@ -66,6 +157,8 @@ else
   gh auth status >/dev/null 2>&1 || { echo "run: gh auth login"; exit 1; }
   ME="$(gh api user --jq .login)"
   [[ "$ME" != "$GATE_REVIEWER" ]] || { echo "--gate-reviewer must differ from the bootstrap/workflow initiator ($ME)."; exit 1; }
+  resolve_canonical_github_login "$GATE_REVIEWER" GATE_REVIEWER || exit 1
+  require_case_insensitively_distinct_identities "$ME" "$GATE_REVIEWER" || exit 1
   REVIEWER_ID="$(gh api "users/$GATE_REVIEWER" --jq .id)"
 fi
 
@@ -104,20 +197,16 @@ if [[ "$DRY" -eq 0 ]]; then
   done
 fi
 
-# Required environment reviewers must already have repository access. Fail with a
-# clear prerequisite error instead of sending an invalid/empty reviewer rule.
+# Generated CODEOWNERS names both the bootstrap actor and the gate reviewer.
+# Validate both identities in every repository before writing or pushing controls.
 if [[ "$DRY" -eq 0 ]]; then
-  for r in "${TARGETS[@]}"; do
-    permission="$(gh api "repos/$ORG/$r/collaborators/$GATE_REVIEWER/permission" --jq .permission 2>/dev/null || true)"
-    case "$permission" in
-      read|triage|write|maintain|admin) ;;
-      *)
-        echo "$GATE_REVIEWER must be an accepted collaborator on $ORG/$r before it can be an environment reviewer."
-        echo "Grant at least read permission and accept the invitation, then rerun bootstrap."
-        exit 1
-        ;;
-    esac
-  done
+  say "Validating generated CODEOWNERS permissions"
+  verify_generated_codeowner_permissions "$ORG" "${ALL[@]}" || {
+    echo "Bootstrap stopped before writing CODEOWNERS. Grant the required permission and rerun."
+    exit 1
+  }
+else
+  say "Dry run: generated CODEOWNERS permissions are not checked"
 fi
 
 # Common factory control files only. Language-specific gates.yml stays owned by each target.
@@ -130,9 +219,9 @@ for r in "${TARGETS[@]}"; do
   run "cp '$ROOT/$FACTORY/templates/target-copilot-instructions.md' '$ROOT/$r/.github/copilot-instructions.md'"
   run "cp '$ROOT/$FACTORY/templates/target-AGENTS.md' '$ROOT/$r/AGENTS.md'"
   run "mkdir -p '$ROOT/$r/docs' && cp '$ROOT/$FACTORY/docs/factory-spec.md' '$ROOT/$r/docs/factory-spec.md'"
-  run "printf '/tests/acceptance/ @%s\n/tests/contract/ @%s\n/tests/regression/ @%s\n/.github/ @%s\n' '$ME' '$ME' '$ME' '$ME' > '$ROOT/$r/.github/CODEOWNERS'"
+  run "write_target_codeowners '$ROOT/$r/.github/CODEOWNERS' '$ME' '$GATE_REVIEWER'"
 done
-run "printf '/tests/acceptance/ @%s\n/docs/factory-spec.md @%s\n/.github/ @%s\n' '$ME' '$ME' '$ME' > '$ROOT/$FACTORY/.github/CODEOWNERS'"
+run "write_factory_codeowners '$ROOT/$FACTORY/.github/CODEOWNERS' '$ME' '$GATE_REVIEWER'"
 
 say "Creating labels"
 for r in "${ALL[@]}"; do
