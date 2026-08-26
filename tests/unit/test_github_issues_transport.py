@@ -64,6 +64,7 @@ def test_transport_serializes_owned_payload_and_validates_issue_response(
     opener = RecordingOpener(
         FakeResponse(
             b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
+            b'"repository_url":"https://api.github.com/repos/acme/factory",'
             b'"labels":[{"name":"stage:business-ready"}]}'
         )
     )
@@ -152,6 +153,7 @@ def test_transport_rejects_invalid_configuration(kwargs: dict[str, object]) -> N
             {
                 "number": "17",
                 "html_url": "https://github.com/acme/factory/issues/17",
+                "repository_url": "https://api.github.com/repos/acme/factory",
                 "labels": [],
             },
         ),
@@ -173,6 +175,7 @@ def test_provider_response_dtos_accept_real_shapes_with_additional_fields() -> N
         {
             "number": 17,
             "html_url": "https://github.com/acme/factory/issues/17",
+            "repository_url": "https://api.github.com/repos/acme/factory",
             "state": "open",
             "labels": [{"name": "stage:business-ready", "color": "0e8a16"}],
         }

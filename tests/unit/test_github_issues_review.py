@@ -51,10 +51,14 @@ class FakeTransport:
         return response
 
 
-def _issue(*labels: str) -> GitHubIssue:
+def _issue(
+    *labels: str,
+    repository_url: str = "https://api.github.com/repos/acme/factory",
+) -> GitHubIssue:
     return GitHubIssue(
         number=17,
         html_url="https://github.com/acme/factory/issues/17",
+        repository_url=repository_url,
         labels=[GitHubLabel(name=label) for label in labels],
     )
 
@@ -229,15 +233,45 @@ def test_create_operations_establish_verified_lifecycle_states_with_owned_payloa
     assert isinstance(transport.calls[1][3], CreateDesignPayload)
 
 
+@pytest.mark.parametrize(
+    "operation, labels",
+    [
+        ("story", ("story", "stage:business-ready")),
+        ("design", ("design", "stage:solution-ready")),
+    ],
+)
+def test_create_operations_reject_provider_repository_mismatch(
+    operation: str,
+    labels: tuple[str, ...],
+) -> None:
+    adapter = GitHubIssuesAdapter(
+        "acme",
+        "factory",
+        "token",
+        transport=FakeTransport(
+            _issue(*labels, repository_url="https://api.github.com/repos/acme/other")
+        ),
+    )
+
+    with pytest.raises(GitHubApiError, match="repository"):
+        if operation == "story":
+            adapter.create_story(_story())
+        else:
+            adapter.create_design(_design())
+
+
 def test_apply_fails_when_label_mutation_response_omits_target() -> None:
     transport = FakeTransport(
         _issue("stage:business-ready"),
         LifecycleLabelMutationResponse(root=[GitHubLabel(name="stage:business-ready")]),
+        _issue("stage:business-ready"),
     )
     adapter = GitHubIssuesAdapter("acme", "factory", "token", transport=transport)
 
     with pytest.raises(GitHubApiError, match="missing target"):
         adapter.apply(_transition())
+
+    assert transport.calls[-1] == ("GET", "/repos/acme/factory/issues/17", GitHubIssue, None)
 
 
 def test_apply_fails_on_conflicting_lifecycle_label_mutation_response() -> None:
@@ -250,11 +284,14 @@ def test_apply_fails_on_conflicting_lifecycle_label_mutation_response() -> None:
                 GitHubLabel(name="stage:solution-ready"),
             ]
         ),
+        _issue("stage:business-ready", "stage:designing", "stage:solution-ready"),
     )
     adapter = GitHubIssuesAdapter("acme", "factory", "token", transport=transport)
 
     with pytest.raises(GitHubApiError, match="unexpected lifecycle labels"):
         adapter.apply(_transition())
+
+    assert transport.calls[-1] == ("GET", "/repos/acme/factory/issues/17", GitHubIssue, None)
 
 
 def test_apply_fails_when_authoritative_reread_has_conflicting_lifecycle_state() -> None:

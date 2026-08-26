@@ -43,6 +43,7 @@ class FakeOpener:
 def _issue_response() -> FakeResponse:
     return FakeResponse(
         b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
+        b'"repository_url":"https://api.github.com/repos/acme/factory",'
         b'"labels":[{"name":"stage:business-ready"}]}'
     )
 
@@ -151,7 +152,14 @@ def test_transport_normalizes_malformed_utf8_to_provider_error(
 )
 def test_issue_web_url_requires_absolute_https(html_url: str) -> None:
     with pytest.raises(ValidationError):
-        GitHubIssue.model_validate({"number": 17, "html_url": html_url, "labels": []})
+        GitHubIssue.model_validate(
+            {
+                "number": 17,
+                "html_url": html_url,
+                "repository_url": "https://api.github.com/repos/acme/factory",
+                "labels": [],
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -162,6 +170,13 @@ def test_issue_web_url_requires_absolute_https(html_url: str) -> None:
     ],
 )
 def test_issue_web_url_accepts_github_and_enterprise_https_urls(html_url: str) -> None:
-    issue = GitHubIssue.model_validate({"number": 17, "html_url": html_url, "labels": []})
+    issue = GitHubIssue.model_validate(
+        {
+            "number": 17,
+            "html_url": html_url,
+            "repository_url": "https://api.github.com/repos/acme/factory",
+            "labels": [],
+        }
+    )
 
     assert str(issue.html_url) == html_url

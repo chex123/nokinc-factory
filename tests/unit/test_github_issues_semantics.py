@@ -51,10 +51,15 @@ class FakeTransport:
         return response
 
 
-def _issue(*labels: str, number: int = 17) -> GitHubIssue:
+def _issue(
+    *labels: str,
+    number: int = 17,
+    repository_url: str = "https://api.github.com/repos/acme/factory",
+) -> GitHubIssue:
     return GitHubIssue(
         number=number,
         html_url=f"https://github.com/acme/factory/issues/{number}",
+        repository_url=repository_url,
         labels=[GitHubLabel(name=label) for label in labels],
     )
 
