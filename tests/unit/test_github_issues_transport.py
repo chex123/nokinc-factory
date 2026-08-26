@@ -134,6 +134,47 @@ def test_transport_rejects_non_standard_json_constants_in_extra_provider_fields(
 
 
 @pytest.mark.parametrize(
+    "body",
+    [
+        (
+            b'{"number":17,"number":18,'
+            b'"html_url":"https://github.com/acme/factory/issues/17",'
+            b'"repository_url":"https://api.github.com/repos/acme/factory",'
+            b'"labels":[{"name":"stage:business-ready"}]}'
+        ),
+        (
+            b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
+            b'"repository_url":"https://api.github.com/repos/acme/factory",'
+            b'"repository_url":"https://api.github.com/repos/acme/other",'
+            b'"labels":[{"name":"stage:business-ready"}]}'
+        ),
+        (
+            b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
+            b'"repository_url":"https://api.github.com/repos/acme/factory",'
+            b'"labels":[],"labels":[{"name":"stage:business-ready"}]}'
+        ),
+        (
+            b'{"number":17,"html_url":"https://github.com/acme/factory/issues/17",'
+            b'"repository_url":"https://api.github.com/repos/acme/factory",'
+            b'"labels":[{"name":"stage:future-state","name":"stage:business-ready"}]}'
+        ),
+    ],
+)
+def test_transport_rejects_duplicate_json_keys_at_any_nesting_level(
+    monkeypatch: pytest.MonkeyPatch,
+    body: bytes,
+) -> None:
+    opener = FakeOpener(FakeResponse(body))
+    monkeypatch.setattr(
+        "nokinc_factory.adapters.github_issues_transport.build_opener",
+        lambda handler: opener,
+    )
+
+    with pytest.raises(GitHubApiError, match="invalid response"):
+        UrllibGitHubTransport("token").request("GET", "/issues/17", GitHubIssue)
+
+
+@pytest.mark.parametrize(
     ("error", "message"),
     [
         (HTTPError("https://github.test", 500, "failure", {}, None), "status 500"),

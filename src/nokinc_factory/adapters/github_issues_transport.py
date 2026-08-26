@@ -31,6 +31,10 @@ class _NonStandardJsonConstant(ValueError):
     """Raised when a provider response uses a non-RFC JSON numeric constant."""
 
 
+class _DuplicateJsonKey(ValueError):
+    """Raised when a provider response repeats a decoded JSON object key."""
+
+
 class GitHubTransport(Protocol):
     """Typed provider transport boundary for the GitHub Issues adapter."""
 
@@ -158,15 +162,34 @@ def _parse_response[ParsedResponse: BaseModel](
         decoded_response = raw_response.decode("utf-8")
         response_data = cast(
             JsonValue,
-            json.loads(decoded_response, parse_constant=_reject_non_standard_json_constant),
+            json.loads(
+                decoded_response,
+                parse_constant=_reject_non_standard_json_constant,
+                object_pairs_hook=_reject_duplicate_json_keys,
+            ),
         )
         return response_model.model_validate(response_data)
-    except (UnicodeError, json.JSONDecodeError, ValidationError, _NonStandardJsonConstant) as exc:
+    except (
+        UnicodeError,
+        json.JSONDecodeError,
+        ValidationError,
+        _DuplicateJsonKey,
+        _NonStandardJsonConstant,
+    ) as exc:
         raise GitHubApiError("GitHub API returned an invalid response") from exc
 
 
 def _reject_non_standard_json_constant(value: str) -> NoReturn:
     raise _NonStandardJsonConstant(f"non-standard JSON constant: {value}")
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
+    decoded_object: dict[str, JsonValue] = {}
+    for key, value in pairs:
+        if key in decoded_object:
+            raise _DuplicateJsonKey(f"duplicate JSON object key: {key}")
+        decoded_object[key] = value
+    return decoded_object
 
 
 def _validate_api_url(api_url: str) -> tuple[str, _Origin]:
