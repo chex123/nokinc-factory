@@ -15,8 +15,9 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: factory_test
+          # Disposable CI-only database, isolated to the ephemeral job network.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -25,8 +26,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      FACTORY_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/factory_test
-      FACTORY_TEST_WORKER_URL: postgresql+psycopg://factory_worker:factory_worker@localhost:5432/factory_test
+      FACTORY_TEST_DATABASE_URL: postgresql+psycopg://postgres@localhost:5432/factory_test
+      FACTORY_TEST_WORKER_URL: postgresql+psycopg://factory_worker@localhost:5432/factory_test
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
@@ -42,7 +43,7 @@ jobs:
           engine = create_engine(os.environ["FACTORY_TEST_DATABASE_URL"])
           with engine.begin() as connection:
             connection.execute(text(
-              "CREATE ROLE factory_worker LOGIN PASSWORD 'factory_worker' "
+                "CREATE ROLE factory_worker LOGIN "
               "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
             ))
           PY

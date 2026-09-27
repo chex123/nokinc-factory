@@ -94,7 +94,7 @@ class RepositoryCodeContext(BaseModel):
     default_branch: str = Field(min_length=1)
     tree_sha: str = Field(pattern=_GIT_SHA_PATTERN)
     context_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    files: tuple[RepositorySourceFile, ...] = Field(min_length=1, max_length=8)
+    files: tuple[RepositorySourceFile, ...] = Field(min_length=1, max_length=32)
 
 
 class GitHubRepositoryMetadata(BaseModel):

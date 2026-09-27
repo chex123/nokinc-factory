@@ -201,6 +201,129 @@ def test_provider_error_does_not_expose_secret_value() -> None:
 
 
 @pytest.mark.parametrize(
+    ("secret_value", "diagnostic_code"),
+    [
+        ("not-json", "MODEL_CREDENTIAL_INVALID_JSON"),
+        ('{"other":"value"}', "MODEL_CREDENTIAL_KEY_MISSING"),
+        ('{"api_key":"  "}', "MODEL_CREDENTIAL_KEY_EMPTY"),
+    ],
+)
+def test_openai_rejects_malformed_secret_without_requesting_provider(
+    secret_value: str,
+    diagnostic_code: str,
+) -> None:
+    from nokinc_factory.adapters.model_providers import ModelProviderError, OpenAIModelPort
+
+    transport = CapturingTransport({"id": "unused", "output_text": "unused"})
+    port = OpenAIModelPort(
+        model="gpt-5.6-luna",
+        family="openai-luna",
+        credential_ref="models/openai/coding",
+        secrets=MemorySecrets(secret_value),
+        transport=transport,
+        api_url="https://api.openai.test/v1",
+    )
+
+    with pytest.raises(ModelProviderError) as error:
+        port.complete(REQUEST)
+
+    assert error.value.diagnostic_code == diagnostic_code
+    assert transport.calls == []
+
+
+def test_openai_credential_store_failure_is_sanitized() -> None:
+    from nokinc_factory.adapters.model_providers import ModelProviderError, OpenAIModelPort
+
+    class BrokenSecrets:
+        def get(self, secret_ref: str) -> str:
+            raise RuntimeError("secret service response must not escape")
+
+    port = OpenAIModelPort(
+        model="gpt-5.6-luna",
+        family="openai-luna",
+        credential_ref="models/openai/coding",
+        secrets=BrokenSecrets(),
+        transport=CapturingTransport({}),
+        api_url="https://api.openai.test/v1",
+    )
+
+    with pytest.raises(ModelProviderError) as error:
+        port.complete(REQUEST)
+
+    assert error.value.diagnostic_code == "MODEL_CREDENTIAL_RETRIEVAL_FAILED"
+    assert "secret service response" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_code"),
+    [
+        ({"id": "resp-1", "output_text": "ok", "usage": {"input_tokens": -1}}, None),
+        ({"id": "resp-1", "output_text": "ok", "usage": "unknown"}, None),
+    ],
+)
+def test_openai_malformed_usage_is_unknown_not_fabricated(
+    payload: dict[str, object],
+    expected_code: None,
+) -> None:
+    from nokinc_factory.adapters.model_providers import OpenAIModelPort
+
+    response = OpenAIModelPort(
+        model="gpt-5.6-luna",
+        family="openai-luna",
+        credential_ref="models/openai/coding",
+        secrets=MemorySecrets('{"api_key":"test-key"}'),
+        transport=CapturingTransport(payload),
+        api_url="https://api.openai.test/v1",
+    ).complete(REQUEST)
+
+    assert response.output == "ok"
+    assert response.usage is expected_code
+
+
+@pytest.mark.parametrize(
+    ("payload", "provider"),
+    [
+        ({"candidates": []}, "google"),
+        ({"candidates": [{"content": {"parts": []}}]}, "google"),
+        ({"output": {"message": {"content": []}}}, "bedrock"),
+        ({"output": {"message": {"content": [{"text": " "}]}}}, "bedrock"),
+    ],
+)
+def test_provider_rejects_empty_or_malformed_output(
+    payload: dict[str, object],
+    provider: str,
+) -> None:
+    from nokinc_factory.adapters.model_providers import (
+        BedrockModelPort,
+        GoogleGeminiModelPort,
+        ModelProviderError,
+    )
+
+    if provider == "google":
+        port = GoogleGeminiModelPort(
+            model="gemini-3.8-flash",
+            family="google-gemini-flash",
+            credential_ref="models/google/reviewer",
+            secrets=MemorySecrets('{"api_key":"test-key"}'),
+            transport=CapturingTransport(payload),
+            api_url="https://generativelanguage.test/v1beta",
+        )
+    else:
+        class StaticBedrockClient:
+            def converse(self, **kwargs: object) -> object:
+                return payload
+
+        port = BedrockModelPort(
+            model="amazon.nova-pro-v1:0",
+            family="amazon-nova-pro",
+            client=StaticBedrockClient(),
+        )
+
+    with pytest.raises(ModelProviderError):
+        port.complete(REQUEST)
+
+
+@pytest.mark.parametrize(
     ("status", "diagnostic_code"),
     [
         (401, "HTTP_AUTHORIZATION"),

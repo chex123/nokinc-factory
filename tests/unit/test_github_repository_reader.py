@@ -10,6 +10,7 @@ from nokinc_factory.adapters.github_app_broker import InstallationToken
 from nokinc_factory.adapters.github_repository_reader import (
     GitHubAppRepositoryReader,
     RepositoryCodeContext,
+    RepositorySourceFile,
 )
 
 NOW = datetime(2026, 9, 25, 20, tzinfo=UTC)
@@ -91,6 +92,28 @@ def test_reader_can_bound_context_at_a_large_model_input_scale() -> None:
 
     assert reader._max_files == 32
     assert reader._max_total_bytes == 800_000
+
+
+def test_repository_context_accepts_the_runtime_file_limit() -> None:
+    files = tuple(
+        RepositorySourceFile(
+            path=f"src/file-{index}.ts",
+            blob_sha=f"{index + 1:040x}",
+            content_digest="sha256:" + f"{index + 1:064x}",
+            text="x",
+        )
+        for index in range(32)
+    )
+
+    context = RepositoryCodeContext(
+        repository="NOK-Apps/flur-sdk",
+        default_branch="main",
+        tree_sha="a" * 40,
+        context_digest="sha256:" + "f" * 64,
+        files=files,
+    )
+
+    assert len(context.files) == 32
 
 
 def test_reader_rejects_provider_identity_mismatch() -> None:

@@ -11,11 +11,13 @@ def test_diff_coverage_job_provisions_disposable_postgres_owner_and_worker() -> 
 
     postgres = job["services"]["postgres"]
     assert postgres["image"].startswith("postgres:16")
+    assert postgres["env"]["POSTGRES_HOST_AUTH_METHOD"] == "trust"
+    assert "POSTGRES_PASSWORD" not in postgres["env"]
     assert job["env"]["FACTORY_TEST_DATABASE_URL"] == (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/factory_test"
+        "postgresql+psycopg://postgres@localhost:5432/factory_test"
     )
     assert job["env"]["FACTORY_TEST_WORKER_URL"] == (
-        "postgresql+psycopg://factory_worker:factory_worker@localhost:5432/factory_test"
+        "postgresql+psycopg://factory_worker@localhost:5432/factory_test"
     )
     assert any(
         step.get("name") == "Create non-owner PostgreSQL test role"
