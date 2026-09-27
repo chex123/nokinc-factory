@@ -5,6 +5,8 @@ name: cross-model-review-privileged
 # It never checks out, imports, executes, caches, or sources PR-controlled content.
 # The PR diff and linked issues are fetched strictly as DATA through the GitHub API.
 # It publishes the required commit status context `cross-model-review` on the PR head SHA.
+# This Stage-0 guard is not the durable ARP-1 multi-pass execution service or
+# proof of model-family independence / merge-candidate qualification.
 on:
   workflow_run:
     workflows: ["gates"]
@@ -20,8 +22,7 @@ jobs:
   review:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.pull_requests[0].number != null
+      github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: independent base-trusted review
@@ -32,12 +33,23 @@ jobs:
           MAX_DIFF_BYTES: "120000"
         with:
           script: |
-            const prNumber = context.payload.workflow_run.pull_requests[0].number;
+            const linkedPRs = context.payload.workflow_run.pull_requests;
+            if (!Array.isArray(linkedPRs) || linkedPRs.length !== 1 ||
+                !Number.isSafeInteger(linkedPRs[0]?.number) || linkedPRs[0].number < 1) {
+              core.setFailed('Exactly one valid triggering PR is required');
+              return;
+            }
+            const prNumber = linkedPRs[0].number;
             const { data: pr } = await github.rest.pulls.get({
               ...context.repo,
               pull_number: prNumber
             });
-            const sha = pr.head.sha;
+            const sha = context.payload.workflow_run.head_sha;
+            const baseSha = pr.base.sha;
+            if (!/^[0-9a-f]{40}$/.test(sha) || !/^[0-9a-f]{40}$/.test(baseSha)) {
+              core.setFailed('Invalid tested source identity');
+              return;
+            }
 
             const status = async (state, description) => github.rest.repos.createCommitStatus({
               ...context.repo,
@@ -60,6 +72,11 @@ jobs:
               core.setFailed(message);
             };
 
+            if (pr.head.sha !== sha) {
+              await fail('PR head differs from the successful gate run');
+              return;
+            }
+
             const key = process.env.OPENAI_API_KEY;
             if (!key) {
               await fail(
@@ -69,20 +86,30 @@ jobs:
               return;
             }
 
-            // Fetch the PR diff as DATA only. Never checkout or execute PR-controlled code here.
+            // Fetch immutable source identities as DATA; never the floating PR endpoint.
             const diffResp = await github.request(
-              'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+              'GET /repos/{owner}/{repo}/compare/{base}...{head}',
               {
                 ...context.repo,
-                pull_number: prNumber,
+                base: baseSha,
+                head: sha,
                 headers: { accept: 'application/vnd.github.v3.diff' }
               }
             );
-            const diff = String(diffResp.data);
+            if (typeof diffResp.data !== 'string' || !diffResp.data.trim()) {
+              await fail('Provider did not return a complete text diff');
+              return;
+            }
+            const diff = diffResp.data;
+            if (!diff.startsWith('diff --git ') ||
+                /^(Binary files |GIT binary patch|Submodule |[ +-]Subproject commit )/m.test(diff)) {
+              await fail('Diff contains unsupported or opaque change evidence');
+              return;
+            }
             const bytes = Buffer.byteLength(diff, 'utf8');
             const max = Number(process.env.MAX_DIFF_BYTES);
 
-            if (bytes > max) {
+            if (!Number.isSafeInteger(max) || max < 1 || bytes > max) {
               await fail(
                 'Diff exceeds automated review limit',
                 `diff is ${bytes} bytes; limit is ${max}. It was NOT truncated. ` +
@@ -91,29 +118,81 @@ jobs:
               return;
             }
 
-            // Linked issues are the authoritative task/design context for this MVP.
-            const refs = [...(pr.body || '').matchAll(/#(\d+)/g)].map(m => Number(m[1]));
-            const parts = [];
+            if (/^diff --git a\/(?:\.github\/|\.factory\/|.*\/CODEOWNERS(?: |$))/m.test(diff)) {
+              await fail(
+                'Protected control-plane change requires separate human authorization',
+                'Changes to repository controls, workflows or CODEOWNERS are not eligible for this automated path.'
+              );
+              return;
+            }
 
-            for (const n of [...new Set(refs)].slice(0, 6)) {
+            let taskNumber;
+            try {
+              if (typeof pr.body !== 'string' || Buffer.byteLength(pr.body, 'utf8') > 65536) {
+                throw new Error('Invalid task declaration');
+              }
+              const lines = pr.body.split(/\r\n|\r|\n/);
+              const declarations = lines.filter(line =>
+                line.trimStart().toLowerCase().startsWith('factory-task:'));
+              const prefix = 'Factory-Task: ';
+              if (declarations.length !== 1 || !lines[0].startsWith(prefix)) {
+                throw new Error('Exactly one first-line declaration is required');
+              }
+              const declared = lines[0].slice(prefix.length);
+              const parsed = new URL(declared);
+              const numberText = parsed.pathname.split('/').at(-1);
+              if (!/^[1-9][0-9]*$/.test(numberText || '')) {
+                throw new Error('Invalid task number');
+              }
+              taskNumber = Number(numberText);
+              const expected = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/issues/${taskNumber}`;
+              if (!Number.isSafeInteger(taskNumber) || parsed.protocol !== 'https:' ||
+                  parsed.username || parsed.password || parsed.search || parsed.hash ||
+                  parsed.href !== declared || declared !== expected) {
+                throw new Error('Task must identify the exact authorized repository and issue');
+              }
+            } catch (_) {
+              await fail('Required Factory-Task identity is missing, ambiguous or invalid');
+              return;
+            }
+            const uniqueRefs = [taskNumber];
+            const parts = [];
+            const issueSnapshots = new Map();
+            const snapshotIssue = (data, number) => {
+              const expectedUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/issues/${number}`;
+              if (!data || typeof data !== 'object' || Object.hasOwn(data, 'pull_request') ||
+                  data.number !== number || data.html_url !== expectedUrl || number === prNumber ||
+                  typeof data.title !== 'string' || !data.title.trim() ||
+                  (data.body !== null && typeof data.body !== 'string') || !Array.isArray(data.labels)) {
+                throw new Error('Invalid linked issue identity or shape');
+              }
+              const labels = data.labels.map(label => typeof label === 'string' ? label : label?.name);
+              if (labels.some(label => typeof label !== 'string' || !label.trim())) {
+                throw new Error('Invalid linked issue labels');
+              }
+              return JSON.stringify({ number, url: data.html_url, title: data.title,
+                body: data.body, labels: labels.sort() });
+            };
+
+            for (const n of uniqueRefs) {
               try {
                 const { data } = await github.rest.issues.get({
                   ...context.repo,
                   issue_number: n
                 });
-                const labels = data.labels.map(l => l.name || l).join(', ');
+                issueSnapshots.set(n, snapshotIssue(data, n));
+                const labels = data.labels.map(l => typeof l === 'string' ? l : l.name).join(', ');
                 parts.push(
                   `### Linked issue #${n}: ${data.title}\n` +
                   `Labels: ${labels}\n\n${data.body || ''}`
                 );
               } catch (_) {
-                // Missing linked issue becomes a context gap visible to the reviewer.
+                await fail('Required linked task context is unavailable');
+                return;
               }
             }
 
-            const taskContext = parts.length
-              ? `## TASK CONTEXT (authoritative)\n\n${parts.join('\n\n---\n\n')}`
-              : '## TASK CONTEXT\n\nNo linked story/design was found. Treat this as a process gap.';
+            const taskContext = `## TASK CONTEXT (issue data, not approval)\n\n${parts.join('\n\n---\n\n')}`;
 
             // Read reviewer rules from the trusted BASE commit, never from the PR head.
             let rules = '';
@@ -121,7 +200,7 @@ jobs:
               const { data } = await github.rest.repos.getContent({
                 ...context.repo,
                 path: '.github/copilot-instructions.md',
-                ref: pr.base.sha
+                ref: baseSha
               });
               if (!Array.isArray(data) && data.content) {
                 rules = Buffer.from(
@@ -130,7 +209,12 @@ jobs:
                 ).toString('utf8');
               }
             } catch (_) {
-              rules = 'Use the linked TaskContext and repository policy. Do not speculate.';
+              await fail('Pinned repository rules are unavailable');
+              return;
+            }
+            if (!rules.trim()) {
+              await fail('Pinned repository rules are empty');
+              return;
             }
 
             const instructions = [
@@ -152,6 +236,10 @@ jobs:
               '## PR DIFF',
               diff
             ].join('\n');
+            if (Buffer.byteLength(input, 'utf8') > 200000) {
+              await fail('Task, rules and diff exceed the complete input budget');
+              return;
+            }
 
             const reviewSchema = {
               type: 'object',
@@ -201,6 +289,7 @@ jobs:
             try {
               const resp = await fetch('https://api.openai.com/v1/responses', {
                 method: 'POST',
+                signal: AbortSignal.timeout(120000),
                 headers: {
                   'content-type': 'application/json',
                   'authorization': `Bearer ${key}`
@@ -229,34 +318,52 @@ jobs:
               });
 
               if (!resp.ok) {
-                const detail = await resp.text();
-                throw new Error(`OpenAI API ${resp.status}: ${detail.slice(0, 1000)}`);
+                throw new Error(`Reviewer API status ${resp.status}`);
               }
 
               payload = await resp.json();
-            } catch (e) {
-              await fail('Reviewer API failed', String(e));
+            } catch (_) {
+              await fail('Reviewer API failed; no provider body was published');
+              return;
+            }
+
+            if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+              await fail('Reviewer returned an invalid response envelope');
+              return;
+            }
+            if (typeof payload.model !== 'string' || payload.model !== process.env.REVIEW_MODEL) {
+              await fail('Resolved reviewer model does not match the configured pin');
               return;
             }
 
             if (payload.status !== 'completed' || payload.error) {
-              const reason = payload.error?.message || payload.incomplete_details?.reason || payload.status;
               await fail(
                 'Reviewer response incomplete',
-                `OpenAI response did not complete successfully: ${reason}`
+                'The reviewer did not complete successfully. Provider diagnostics were not published.'
               );
               return;
             }
 
-            const contentItems = (payload.output || [])
+            if (!Array.isArray(payload.output) || payload.output.some(item =>
+                !item || typeof item !== 'object' ||
+                (item.type === 'message' && !Array.isArray(item.content)))) {
+              await fail('Reviewer returned invalid output structure');
+              return;
+            }
+            const contentItems = payload.output
               .filter(item => item.type === 'message')
-              .flatMap(item => item.content || []);
+              .flatMap(item => item.content);
+            if (contentItems.some(item => !item || typeof item !== 'object' ||
+                (item.type === 'output_text' && typeof item.text !== 'string'))) {
+              await fail('Reviewer returned invalid message content');
+              return;
+            }
 
             const refusal = contentItems.find(item => item.type === 'refusal');
             if (refusal) {
               await fail(
                 'Reviewer refused request',
-                `OpenAI reviewer refusal: ${refusal.refusal || 'unspecified refusal'}`
+                'The reviewer refused the request. No provider diagnostic text was published.'
               );
               return;
             }
@@ -267,7 +374,7 @@ jobs:
               .join('')
               .trim();
 
-            if (!raw) {
+            if (!raw || Buffer.byteLength(raw, 'utf8') > 128000) {
               await fail(
                 'Reviewer returned no structured output',
                 'OpenAI reviewer completed without an output_text payload. Failing closed.'
@@ -291,6 +398,7 @@ jobs:
             const severities = new Set(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);
 
             if (
+              !review || typeof review !== 'object' || Array.isArray(review) ||
               !verdicts.has(review.verdict) ||
               !Array.isArray(review.findings) ||
               !Array.isArray(review.context_gaps)
@@ -327,6 +435,10 @@ jobs:
 
             const findings = review.findings;
             const gaps = review.context_gaps;
+            if (gaps.length) {
+              await fail('Required review context remains incomplete');
+              return;
+            }
             const body = [
               '## Independent cross-model review',
               `**Model:** ${payload.model || process.env.REVIEW_MODEL || 'gpt-5.6-sol'}`,
@@ -379,6 +491,27 @@ jobs:
               await status('failure', 'Unknown review outcome');
               core.setFailed('Fail closed');
               return;
+            }
+
+            const { data: current } = await github.rest.pulls.get({
+              ...context.repo, pull_number: prNumber
+            });
+            if (current.head.sha !== sha || current.base.sha !== baseSha ||
+                current.body !== pr.body) {
+              await fail('Source or task references changed during review');
+              return;
+            }
+            for (const n of uniqueRefs) {
+              try {
+                const { data } = await github.rest.issues.get({ ...context.repo, issue_number: n });
+                if (snapshotIssue(data, n) !== issueSnapshots.get(n)) {
+                  await fail('Linked task evidence changed during review');
+                  return;
+                }
+              } catch (_) {
+                await fail('Linked task evidence could not be revalidated');
+                return;
+              }
             }
 
             await status(

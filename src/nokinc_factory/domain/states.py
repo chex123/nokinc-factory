@@ -2,6 +2,9 @@
 
 Transitions are compare-and-swap: `expected_current` makes duplicate webhooks
 idempotent. See Spec Part 1.
+
+A nonblank approval reference is necessary to exit a human gate, not proof of
+verified identity, bound approval evidence or execution authority.
 """
 
 from __future__ import annotations
@@ -118,7 +121,9 @@ class Transition(BaseModel):
             )
         if self.target not in _ALLOWED[actual]:
             raise IllegalTransition(f"{actual} -> {self.target} is not permitted")
-        if actual in HUMAN_GATES and self.approval_id is None:
+        if actual in HUMAN_GATES and (
+            self.approval_id is None or not self.approval_id.strip()
+        ):
             raise IllegalTransition(f"leaving {actual} requires a bound human approval")
 
 

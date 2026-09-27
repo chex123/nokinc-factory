@@ -64,3 +64,27 @@ for a solved problem. See spec Part 15.
 - Regex over source text where an AST query exists.
 - A tool that returns `True` when it could not actually check.
 - Mutating a frozen artefact (acceptance test, approved ChangeSet, snapshot).
+
+## Pilot image deployment
+
+- For any Factory image build, scan, publish, or ECS rollout, follow
+  `.github/skills/factory-image-deployment/SKILL.md`.
+- The standard production path is the manual main-branch
+  `.github/workflows/deploy-pilot.yml`. It runs quality gates, waits for the
+  protected `pilot-deploy` environment, uses AWS OIDC, and invokes
+  `scripts/deploy_pilot.py`.
+- Never promote a mutable tag, an unscanned digest, or an image with critical,
+  high, or unclassified ECR findings. Do not bypass the workflow with direct
+  ECS API/CLI deployment commands.
+
+## Pilot image deployment
+
+- For any Factory image build, scan, publish, or ECS rollout, follow
+  `.github/skills/factory-image-deployment/SKILL.md`.
+- The standard production path is the manual main-branch
+  `.github/workflows/deploy-pilot.yml`. It runs quality gates, waits for the
+  protected `pilot-deploy` environment, uses AWS OIDC, and invokes
+  `scripts/deploy_pilot.py`.
+- Never promote a mutable tag, an unscanned digest, or an image with critical,
+  high, or unclassified ECR findings. Do not bypass the workflow with direct
+  ECS API/CLI deployment commands.

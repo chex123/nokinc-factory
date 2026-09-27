@@ -1,0 +1,52 @@
+{
+  "qualification_date": "2026-09-22",
+  "mode": "synthetic_masked",
+  "overall_status": "LIVE_PROBE_PASSED_PENDING_FULL_QUALIFICATION",
+  "data_policy": "no_customer_data",
+  "budget": {
+    "corrected_openai_probe_max_calls": 2,
+    "corrected_openai_probe_reserved_usd": "10.00",
+    "max_output_tokens": 256
+  },
+  "models": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "family": "openai-luna",
+      "capability": "coding_doer",
+      "status": "PROBE_PASSED",
+      "provider_execution_id": "resp_0b0a48dd1a34d935006ab29375266487d2a6971ab51f6262bb",
+      "output_digest": "sha256:5fc83f8c6410457b15d9cb29240956999e9e3fbe3b62e75ace4bc8811f889c56"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "family": "google-gemini-flash",
+      "capability": "coding_reviewer",
+      "status": "PROBE_PASSED",
+      "provider_execution_id": "XMuxavOVFNe1_PUP5rKg0Ac",
+      "output_digest": "sha256:5fc83f8c6410457b15d9cb29240956999e9e3fbe3b62e75ace4bc8811f889c56"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "family": "openai-astra",
+      "capability": "architecture_business_doer",
+      "status": "PROBE_PASSED",
+      "provider_execution_id": "resp_04193624fca8c781006ab29377771487d282d8a9604618fcd7",
+      "output_digest": "sha256:5fc83f8c6410457b15d9cb29240956999e9e3fbe3b62e75ace4bc8811f889c56"
+    },
+    {
+      "provider": "aws-bedrock",
+      "model": "amazon.nova-pro-v1:0",
+      "family": "amazon-nova-pro",
+      "capability": "architecture_business_reviewer",
+      "status": "PROBE_PASSED",
+      "provider_execution_id": "13aad52b-763c-41cc-9207-a538c59e9332",
+      "output_length": 17,
+      "ecs_task_role_policy": "APPLIED",
+      "ecs_task_role_simulation": "allowed",
+      "note": "Single synthetic ECS runtime probe passed; full qualification matrix remains pending."
+    }
+  ]
+}

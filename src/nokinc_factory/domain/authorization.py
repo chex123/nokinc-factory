@@ -5,13 +5,16 @@ Invariants enforced here:
   * A signature proves origin, not authorization.
   * Two-person control requires a shared, unexpired window.
   * Expiry of security containment goes to a SAFE STATE, not the previous state.
+
+Window and containment-policy checks run at use, including for model_copy
+snapshots. They do not verify signatures, identities, revocation or authority.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -34,6 +37,13 @@ class ActuatorClass(StrEnum):
     COOPERATIVE = "COOPERATIVE"  # in-app; NOT trusted if process compromised
     OPERATIONAL_EXTERNAL = "OPERATIONAL_EXTERNAL"
     SECURITY_EXTERNAL = "SECURITY_EXTERNAL"
+
+
+def _window_contains(issued: datetime, expires: datetime, now: datetime) -> bool:
+    """Unknown timezones cannot establish a current window (Spec Part 1)."""
+    if any(value.utcoffset() is None for value in (issued, expires, now)):
+        return False
+    return issued.astimezone(UTC) <= now.astimezone(UTC) < expires.astimezone(UTC)
 
 
 class TargetBinding(BaseModel):
@@ -86,9 +96,10 @@ class HumanApproval(BaseModel):
     signature: str
 
     def is_valid_for(self, digest: str, now: datetime) -> bool:
-        # Future-dated approvals are not valid yet. This also prevents a malformed
-        # provider record from satisfying two-person control before it existed.
-        return self.decision_digest == digest and self.approved_at <= now < self.expires_at
+        """Check digest and current aware window, not signature or issuer authority."""
+        return self.decision_digest == digest and _window_contains(
+            self.approved_at, self.expires_at, now
+        )
 
 
 class StaleAuthorization(Exception):
@@ -96,7 +107,7 @@ class StaleAuthorization(Exception):
 
 
 class ExpiredAuthorization(Exception):
-    """Authorization or approval outlived its window."""
+    """Authorization or approval has no current, safe execution window."""
 
 
 class Authorization(BaseModel):
@@ -156,6 +167,7 @@ class Authorization(BaseModel):
         Approver A at 09:00 and approver B at 17:00 on a decision that expired
         at 09:15 is not two-person control.
         """
+        self._check_validity(now)
         digest = self.decision_digest()
         valid = [
             a
@@ -170,17 +182,33 @@ class Authorization(BaseModel):
                 f"{self.decision_id}: two-person control requires 2 distinct valid approvers, "
                 f"found {len(identities)}"
             )
-        if min(a.expires_at for a in valid) <= max(a.approved_at for a in valid):
-            raise ExpiredAuthorization(f"{self.decision_id}: approval windows do not overlap")
+        # Every valid window contains the same instant, so their intersection is nonempty.
 
-    def revalidate(self, observed: TargetBinding, now: datetime) -> None:
-        """Call IMMEDIATELY before execution. Never cache the result."""
-        if now > self.expires_at:
-            raise ExpiredAuthorization(f"{self.decision_id}: authorization expired")
-        if now > self.authorized_at + timedelta(seconds=self.max_staleness_seconds):
+    def _check_validity(self, now: datetime) -> None:
+        """Copied snapshots remain hashable, but cannot bypass execution checks."""
+        if not _window_contains(self.authorized_at, self.expires_at, now):
+            raise ExpiredAuthorization(
+                f"{self.decision_id}: authorization window is invalid or not current"
+            )
+        age = now.astimezone(UTC) - self.authorized_at.astimezone(UTC)
+        age_microseconds = (age.days * 86400 + age.seconds) * 1_000_000 + age.microseconds
+        if (
+            self.max_staleness_seconds < 0
+            or age_microseconds > self.max_staleness_seconds * 1_000_000
+        ):
             raise ExpiredAuthorization(
                 f"{self.decision_id}: exceeded max_staleness of {self.max_staleness_seconds}s"
             )
+        if self.actuator_class == ActuatorClass.SECURITY_EXTERNAL and self.on_expiry not in (
+            OnExpiry.HOLD_AND_ESCALATE, OnExpiry.FAIL_CLOSED,
+        ):
+            raise ExpiredAuthorization(
+                f"{self.decision_id}: security containment requires a safe expiry policy"
+            )
+
+    def revalidate(self, observed: TargetBinding, now: datetime) -> None:
+        """Call IMMEDIATELY before execution. Never cache the result."""
+        self._check_validity(now)
         if not self.target.matches(observed):
             raise StaleAuthorization(
                 f"{self.decision_id}: target identity changed since authorization"
