@@ -8,7 +8,10 @@ dependencies = ["pydantic>=2.9", "cryptography>=43.0", "pyyaml>=6.0"]
 [project.optional-dependencies]
 dev = ["pytest>=8.3","pytest-bdd>=8.0","pytest-cov>=6.0","diff-cover>=9.2",
        "mypy>=1.14","ruff>=0.8","types-PyYAML>=6.0","pydantic-ai-slim[openai]>=2,<3","detect-secrets>=1.5","pip-audit>=2.7",
-       "sqlalchemy>=2.0","psycopg[binary]>=3.2"]
+       "sqlalchemy>=2.0","psycopg[binary]>=3.2",
+       "fastapi>=0.115","uvicorn[standard]>=0.32","alembic>=1.14",
+       "boto3>=1.35","PyJWT[crypto]>=2.10,<3",
+       "mcp>=1.2","tree-sitter>=0.23","tree-sitter-language-pack>=0.3","multilspy>=0.0.14"]
 # PostgreSQL integration contracts import the declared phase1 store during collection.
 # Added per phase, not up front. See docs/BOOTSTRAP.md.
 phase1 = ["fastapi>=0.115","uvicorn[standard]>=0.32","sqlalchemy>=2.0","alembic>=1.14","psycopg[binary]>=3.2","boto3>=1.35","PyJWT[crypto]>=2.10,<3"]
