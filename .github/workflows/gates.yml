@@ -16,13 +16,13 @@ jobs:
         with: {fetch-depth: 0}
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,phase1,phase2]"
       - name: build
-        run: python -m compileall src
+        run: python -m compileall -q src scripts
       - name: types
-        run: mypy --strict src
+        run: mypy --strict src scripts/deploy_pilot.py
       - name: lint
-        run: ruff check src tests
+        run: ruff check src tests scripts
       - name: unit
         run: python -m pytest tests/unit -q
       - name: acceptance

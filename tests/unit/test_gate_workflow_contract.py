@@ -45,3 +45,10 @@ def test_ci_runs_pytest_as_a_python_module() -> None:
     assert "run: python -m pytest tests/unit -q" in source
     assert "run: python -m pytest tests/acceptance -q" in source
     assert "python -m pytest --cov=src" in source
+
+def test_ci_installs_runtime_extras_and_typechecks_deployment_script() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+    assert 'pip install -e ".[dev,phase1,phase2]"' in source
+    assert "mypy --strict src scripts/deploy_pilot.py" in source
+    assert "ruff check src tests scripts" in source
+    assert "python -m compileall -q src scripts" in source

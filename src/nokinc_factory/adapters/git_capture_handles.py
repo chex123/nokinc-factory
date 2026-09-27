@@ -83,7 +83,7 @@ def _windows_handle(
 
     if path.drive.startswith("\\\\"):
         raise ValueError("Unsupported network path for local capture")
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined, unused-ignore]
     create = kernel.CreateFileW
     create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
                        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
@@ -107,11 +107,13 @@ def _windows_handle(
                         1 if directory else 3,
                         None, 3, 0x00200000 | (0x02000000 if directory else 0), None)
         if handle == wintypes.HANDLE(-1).value:
-            raise ctypes.WinError(ctypes.get_last_error())
+            last_error = ctypes.get_last_error()  # type: ignore[attr-defined, unused-ignore]
+            raise ctypes.WinError(last_error)  # type: ignore[attr-defined, unused-ignore]
         tag = (wintypes.DWORD * 2)()
         try:
             if not attributes(handle, 9, ctypes.byref(tag), ctypes.sizeof(tag)):
-                raise ctypes.WinError(ctypes.get_last_error())
+                last_error = ctypes.get_last_error()  # type: ignore[attr-defined, unused-ignore]
+                raise ctypes.WinError(last_error)  # type: ignore[attr-defined, unused-ignore]
             if tag[0] & 0x400:
                 raise ValueError(f"Unsupported symlink/reparse path: {current.name}")
             if identity(before) != identity(current.lstat()):
@@ -132,7 +134,10 @@ def _windows_handle(
         raise IsADirectoryError(f"Candidate is a directory: {path.name}")
     handle, before = opened(path, directory=False)
     try:
-        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        fd = msvcrt.open_osfhandle(  # type: ignore[attr-defined, unused-ignore]
+            handle,
+            os.O_RDONLY | os.O_BINARY,  # type: ignore[attr-defined, unused-ignore]
+        )
     except OSError:
         close(handle)
         raise
