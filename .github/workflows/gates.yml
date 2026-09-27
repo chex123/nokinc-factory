@@ -11,12 +11,41 @@ jobs:
   deterministic-gates:
     name: deterministic-gates
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: factory_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d factory_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      FACTORY_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/factory_test
+      FACTORY_TEST_WORKER_URL: postgresql+psycopg://factory_worker:factory_worker@localhost:5432/factory_test
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -e ".[dev,phase1,phase2]"
+      - name: Create non-owner PostgreSQL test role
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["FACTORY_TEST_DATABASE_URL"])
+          with engine.begin() as connection:
+            connection.execute(text(
+              "CREATE ROLE factory_worker LOGIN PASSWORD 'factory_worker' "
+              "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+            ))
+          PY
       - name: build
         run: python -m compileall -q src scripts
       - name: types
