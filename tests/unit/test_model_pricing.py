@@ -65,6 +65,33 @@ def test_unknown_model_has_no_fabricated_list_price() -> None:
     ) is None
 
 
+def test_unpriced_google_cache_write_returns_no_cost_estimate() -> None:
+    estimate = estimate_model_cost(
+        provider="google",
+        model="gemini-3.8-flash",
+        usage=ModelUsage(
+            input_tokens=100,
+            cache_write_input_tokens=1,
+            output_tokens=10,
+        ),
+        as_of=date(2026, 9, 27),
+    )
+
+    assert estimate is None
+
+
+def test_nova_cost_is_unknown_outside_the_published_region() -> None:
+    estimate = estimate_model_cost(
+        provider="aws-bedrock",
+        model="amazon.nova-pro-v1:0",
+        usage=ModelUsage(input_tokens=100, output_tokens=10),
+        as_of=date(2026, 9, 27),
+        region="eu-west-1",
+    )
+
+    assert estimate is None
+
+
 def test_model_context_limits_reflect_each_configured_provider_maximum() -> None:
     luna = model_context_limits(provider="openai", model="gpt-5.6-luna")
     gemini = model_context_limits(provider="google", model="gemini-3.8-flash")

@@ -181,6 +181,113 @@ def test_bedrock_model_port_maps_converse_response() -> None:
     }
 
 
+def test_bedrock_default_client_uses_runtime_and_configured_region(monkeypatch) -> None:
+    import boto3
+
+    from nokinc_factory.adapters.model_providers import BedrockModelPort
+
+    client = CapturingBedrockClient()
+    calls: list[tuple[str, str | None]] = []
+
+    def create_client(service_name: str, *, region_name: str | None = None) -> object:
+        calls.append((service_name, region_name))
+        return client
+
+    monkeypatch.setattr(boto3, "client", create_client)
+    port = BedrockModelPort(
+        model="amazon.nova-pro-v1:0",
+        family="amazon-nova-pro",
+        region="us-east-1",
+    )
+
+    response = port.complete(REQUEST)
+
+    assert calls == [("bedrock-runtime", "us-east-1")]
+    assert response.provider_execution_id == "bedrock-request-1"
+
+
+def test_bedrock_default_client_failure_is_sanitized(monkeypatch) -> None:
+    import boto3
+
+    from nokinc_factory.adapters.model_providers import BedrockModelPort, ModelProviderError
+
+    def fail_client(service_name: str, *, region_name: str | None = None) -> object:
+        raise RuntimeError("sensitive credential detail")
+
+    monkeypatch.setattr(boto3, "client", fail_client)
+
+    with pytest.raises(ModelProviderError, match="Bedrock runtime is unavailable") as error:
+        BedrockModelPort(
+            model="amazon.nova-pro-v1:0",
+            family="amazon-nova-pro",
+            region="us-east-1",
+        )
+
+    assert "sensitive credential detail" not in str(error.value)
+
+
+def test_invalid_provider_usage_is_not_used_to_estimate_cost() -> None:
+    from nokinc_factory.adapters.model_providers import (
+        BedrockModelPort,
+        GoogleGeminiModelPort,
+        OpenAIModelPort,
+    )
+
+    secrets = MemorySecrets('{"api_key":"provider-test-key"}')
+    openai = OpenAIModelPort(
+        model="gpt-5.6-luna",
+        family="openai-luna",
+        credential_ref="models/openai/coding",
+        secrets=secrets,
+        transport=CapturingTransport({
+            "id": "openai-usage-1",
+            "output_text": "ok",
+            "usage": {
+                "input_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 6},
+                "output_tokens": 1,
+            },
+        }),
+    ).complete(REQUEST)
+    google = GoogleGeminiModelPort(
+        model="gemini-3.8-flash",
+        family="google-gemini-flash",
+        credential_ref="models/google/coding-reviewer",
+        secrets=secrets,
+        transport=CapturingTransport({
+            "responseId": "google-usage-1",
+            "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 5,
+                "cachedContentTokenCount": 6,
+                "candidatesTokenCount": 1,
+            },
+        }),
+    ).complete(REQUEST)
+
+    class InvalidUsageBedrockClient:
+        def converse(self, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "output": {"message": {"content": [{"text": "ok"}]}},
+                "usage": {
+                    "inputTokens": 5,
+                    "outputTokens": 1,
+                    "cacheReadInputTokens": 4,
+                    "cacheWriteInputTokens": 2,
+                },
+            }
+
+    bedrock = BedrockModelPort(
+        model="amazon.nova-pro-v1:0",
+        family="amazon-nova-pro",
+        client=InvalidUsageBedrockClient(),
+    ).complete(REQUEST)
+
+    assert openai.usage is None
+    assert google.usage is None
+    assert bedrock.usage is None
+
+
 def test_provider_error_does_not_expose_secret_value() -> None:
     from nokinc_factory.adapters.model_providers import ModelProviderError, OpenAIModelPort
 
