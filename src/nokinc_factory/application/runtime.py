@@ -31,6 +31,7 @@ from nokinc_factory.application.grounded_repository_discussion import (
     GroundedRepositoryDiscussion,
     GroundedRepositoryDiscussionRouter,
 )
+from nokinc_factory.application.model_pricing import model_context_limits
 from nokinc_factory.application.service import (
     BrowserLoginPort,
     PrincipalVerifier,
@@ -47,6 +48,8 @@ class _ModelRouteConfig(BaseModel):
     runtime: str = Field(min_length=1, max_length=100)
     credential_ref: str = Field(min_length=1, max_length=1000)
     exact_model_id: str = Field(min_length=1, max_length=200)
+    context_window_tokens: int = Field(strict=True, gt=0)
+    max_input_tokens: int = Field(strict=True, gt=0)
 
     @model_validator(mode="after")
     def _runtime_matches_provider(self) -> _ModelRouteConfig:
@@ -62,6 +65,12 @@ class _ModelRouteConfig(BaseModel):
             and self.credential_ref != "iam-role://factory-model-runtime/bedrock"
         ):
             raise ValueError("Bedrock credentials must come from the task IAM role")
+        limits = model_context_limits(provider=self.provider, model=self.exact_model_id)
+        if limits is None or (
+            self.context_window_tokens != limits.context_window_tokens
+            or self.max_input_tokens != limits.max_input_tokens
+        ):
+            raise ValueError("pilot model context limits do not match provider documentation")
         return self
 
 
@@ -264,6 +273,7 @@ def _build_discussion_profile(
         reviewer_provider=model_pair.reviewer.provider,
         reviewer_model=model_pair.reviewer.exact_model_id,
         reviewer_family=model_pair.reviewer.family,
+        pricing_region=region,
     )
 
 
@@ -318,6 +328,7 @@ def _build_business_analyst(
         reviewer_provider=model_pair.reviewer.provider,
         reviewer_model=model_pair.reviewer.exact_model_id,
         reviewer_family=model_pair.reviewer.family,
+        pricing_region=config.secrets.region,
     )
 
 
@@ -399,6 +410,9 @@ def build_app() -> FastAPI:
         GitHubAppRepositoryReader(
             broker=github_app_broker,
             repositories=github_app_config.repositories,
+            max_files=32,
+            max_file_bytes=32_000,
+            max_total_bytes=800_000,
         )
         if github_app_broker is not None and github_app_config is not None
         else None

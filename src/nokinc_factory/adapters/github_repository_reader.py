@@ -154,12 +154,12 @@ class GitHubAppRepositoryReader:
             lambda token: UrllibGitHubTransport(token, api_url=api_url)
         )
         self._clock = clock or (lambda: datetime.now(UTC))
-        if max_files <= 0 or max_files > 8:
-            raise ValueError("repository context file limit must be between 1 and 8")
+        if max_files <= 0 or max_files > 32:
+            raise ValueError("repository context file limit must be between 1 and 32")
         if max_file_bytes <= 0 or max_file_bytes > 32_000:
             raise ValueError("repository context file limit must not exceed 32000 bytes")
-        if max_total_bytes <= 0 or max_total_bytes > 128_000:
-            raise ValueError("repository context limit must not exceed 128000 bytes")
+        if max_total_bytes <= 0 or max_total_bytes > 800_000:
+            raise ValueError("repository context limit must not exceed 800000 bytes")
         self._max_files = max_files
         self._max_file_bytes = max_file_bytes
         self._max_total_bytes = max_total_bytes

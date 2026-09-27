@@ -33,7 +33,7 @@ const state = {
   conversations: [],
   activeId: null,
   busy: false,
-  budgetExhausted: false,
+  turnLimitReached: false,
   signedIn: false,
   repositories: [],
 };
@@ -106,16 +106,16 @@ function setConnection(ready, message) {
   elements.session.textContent = ready ? "Session ready" : "Sign-in required";
   elements.session.dataset.ready = String(ready);
   elements.composerStatus.textContent = ready
-    ? (state.budgetExhausted
-      ? "This pilot's authorized model-test allowance has been used."
+    ? (state.turnLimitReached
+      ? "This pilot's chat-turn limit has been reached."
       : "Code answers use selected repositories; runtime checks need an isolated worker.")
     : "Sign in to start a conversation.";
   elements.account.textContent = ready ? "Sign out" : "Sign in";
   elements.account.href = ready ? "/auth/logout" : "/auth/login";
-  elements.message.disabled = !ready || state.busy || state.budgetExhausted;
-  elements.send.disabled = !ready || state.busy || state.budgetExhausted;
-  elements.repositories.disabled = !ready || state.busy || state.budgetExhausted;
-  elements.mode.disabled = !ready || state.busy || state.budgetExhausted;
+  elements.message.disabled = !ready || state.busy || state.turnLimitReached;
+  elements.send.disabled = !ready || state.busy || state.turnLimitReached;
+  elements.repositories.disabled = !ready || state.busy || state.turnLimitReached;
+  elements.mode.disabled = !ready || state.busy || state.turnLimitReached;
 }
 
 function appendText(parent, text, className) {
@@ -341,10 +341,10 @@ async function sendMessage(event) {
       return;
     }
     if (!response.ok) {
-      if (result?.detail?.code === "CHAT_MODEL_TURN_BUDGET_EXHAUSTED") {
-        state.budgetExhausted = true;
-        setConnection(true, "Test allowance used");
-        showNotice("The authorized model-test allowance for this pilot has been used. No further model calls will be made.");
+      if (result?.detail?.code === "CHAT_MODEL_TURN_LIMIT_REACHED") {
+        state.turnLimitReached = true;
+        setConnection(true, "Chat-turn limit reached");
+        showNotice("No more chat turns are available in this pilot.");
         elements.message.value = message;
         return;
       }

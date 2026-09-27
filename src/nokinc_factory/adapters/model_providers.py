@@ -10,7 +10,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from nokinc_factory.ports.model import ModelPort, ModelRequest, ModelResponse, ModelStatus
+from nokinc_factory.ports.model import (
+    ModelPort,
+    ModelRequest,
+    ModelResponse,
+    ModelStatus,
+    ModelUsage,
+)
 
 
 class ModelProviderError(RuntimeError):
@@ -165,6 +171,7 @@ class _CredentialModelPort(ModelPort):
         *,
         output: str,
         provider_execution_id: object,
+        usage: ModelUsage | None = None,
     ) -> ModelResponse:
         if not output.strip():
             raise ModelProviderError("model provider returned empty output")
@@ -175,6 +182,7 @@ class _CredentialModelPort(ModelPort):
             family=self._family,
             output=output,
             provider_execution_id=execution_id,
+            usage=usage,
         )
 
 
@@ -218,7 +226,11 @@ class OpenAIModelPort(_CredentialModelPort):
         )
         payload = self._response_payload(response_status, response_body)
         output = _openai_output(payload)
-        return self._response(output=output, provider_execution_id=payload.get("id"))
+        return self._response(
+            output=output,
+            provider_execution_id=payload.get("id"),
+            usage=_openai_usage(payload.get("usage")),
+        )
 
 
 class GoogleGeminiModelPort(_CredentialModelPort):
@@ -260,7 +272,11 @@ class GoogleGeminiModelPort(_CredentialModelPort):
         )
         payload = self._response_payload(response_status, response_body)
         output = _google_output(payload)
-        return self._response(output=output, provider_execution_id=payload.get("responseId"))
+        return self._response(
+            output=output,
+            provider_execution_id=payload.get("responseId"),
+            usage=_google_usage(payload.get("usageMetadata")),
+        )
 
 
 class BedrockModelPort(ModelPort):
@@ -297,6 +313,7 @@ class BedrockModelPort(ModelPort):
             raise ModelProviderError("Bedrock returned an invalid response")
         response = cast(dict[str, object], raw_response)
         output = _bedrock_output(response)
+        usage = _bedrock_usage(response.get("usage"))
         metadata = response.get("ResponseMetadata")
         execution_id = None
         if isinstance(metadata, dict) and isinstance(metadata.get("RequestId"), str):
@@ -309,6 +326,7 @@ class BedrockModelPort(ModelPort):
             family=self._family,
             output=output,
             provider_execution_id=execution_id,
+            usage=usage,
         )
 
 
@@ -408,6 +426,84 @@ def _bedrock_output(payload: Mapping[str, object]) -> str:
     if not text_parts:
         raise ModelProviderError("Bedrock returned an invalid response")
     return "".join(text_parts)
+
+
+def _nonnegative_token_count(value: object) -> int | None:
+    if type(value) is int and value >= 0:
+        return value
+    return None
+
+
+def _openai_usage(value: object) -> ModelUsage | None:
+    if not isinstance(value, dict):
+        return None
+    input_tokens = _nonnegative_token_count(value.get("input_tokens"))
+    output_tokens = _nonnegative_token_count(value.get("output_tokens"))
+    input_details = value.get("input_tokens_details")
+    cached_tokens = (
+        _nonnegative_token_count(input_details.get("cached_tokens", 0))
+        if isinstance(input_details, dict)
+        else 0
+    )
+    if (
+        input_tokens is None
+        or output_tokens is None
+        or cached_tokens is None
+        or cached_tokens > input_tokens
+    ):
+        return None
+    return ModelUsage(
+        input_tokens=input_tokens - cached_tokens,
+        cached_input_tokens=cached_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _google_usage(value: object) -> ModelUsage | None:
+    if not isinstance(value, dict):
+        return None
+    prompt_tokens = _nonnegative_token_count(value.get("promptTokenCount"))
+    candidate_tokens = _nonnegative_token_count(value.get("candidatesTokenCount"))
+    cached_tokens = _nonnegative_token_count(value.get("cachedContentTokenCount", 0))
+    thought_tokens = _nonnegative_token_count(value.get("thoughtsTokenCount", 0))
+    tool_use_tokens = _nonnegative_token_count(value.get("toolUsePromptTokenCount", 0))
+    if (
+        prompt_tokens is None
+        or candidate_tokens is None
+        or cached_tokens is None
+        or thought_tokens is None
+        or tool_use_tokens is None
+        or cached_tokens > prompt_tokens
+    ):
+        return None
+    return ModelUsage(
+        input_tokens=prompt_tokens - cached_tokens + tool_use_tokens,
+        cached_input_tokens=cached_tokens,
+        output_tokens=candidate_tokens + thought_tokens,
+    )
+
+
+def _bedrock_usage(value: object) -> ModelUsage | None:
+    if not isinstance(value, dict):
+        return None
+    input_tokens = _nonnegative_token_count(value.get("inputTokens"))
+    output_tokens = _nonnegative_token_count(value.get("outputTokens"))
+    cached_tokens = _nonnegative_token_count(value.get("cacheReadInputTokens", 0))
+    cache_write_tokens = _nonnegative_token_count(value.get("cacheWriteInputTokens", 0))
+    if (
+        input_tokens is None
+        or output_tokens is None
+        or cached_tokens is None
+        or cache_write_tokens is None
+        or cached_tokens + cache_write_tokens > input_tokens
+    ):
+        return None
+    return ModelUsage(
+        input_tokens=input_tokens - cached_tokens - cache_write_tokens,
+        cached_input_tokens=cached_tokens,
+        cache_write_input_tokens=cache_write_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 def _bedrock_client(region: str | None) -> BedrockConverseClient:

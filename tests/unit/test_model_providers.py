@@ -47,6 +47,13 @@ class CapturingBedrockClient:
         self.request = kwargs
         return {
             "output": {"message": {"content": [{"text": "Bedrock review complete."}]}},
+            "usage": {
+                "inputTokens": 100,
+                "outputTokens": 20,
+                "totalTokens": 120,
+                "cacheReadInputTokens": 40,
+                "cacheWriteInputTokens": 10,
+            },
             "ResponseMetadata": {"RequestId": "bedrock-request-1"},
         }
 
@@ -56,7 +63,15 @@ def test_openai_model_port_uses_secret_and_maps_responses_output() -> None:
 
     secrets = MemorySecrets('{"api_key":"openai-test-key"}')
     transport = CapturingTransport(
-        {"id": "resp-1", "output_text": "OpenAI review complete."},
+        {
+            "id": "resp-1",
+            "output_text": "OpenAI review complete.",
+            "usage": {
+                "input_tokens": 100,
+                "input_tokens_details": {"cached_tokens": 40},
+                "output_tokens": 20,
+            },
+        },
     )
     port = OpenAIModelPort(
         model="openai.gpt-5.6-luna",
@@ -74,6 +89,10 @@ def test_openai_model_port_uses_secret_and_maps_responses_output() -> None:
     assert response.family == "openai-luna"
     assert response.output == "OpenAI review complete."
     assert response.provider_execution_id == "resp-1"
+    assert response.usage is not None
+    assert response.usage.input_tokens == 60
+    assert response.usage.cached_input_tokens == 40
+    assert response.usage.output_tokens == 20
     assert secrets.references == [
         "aws-secretsmanager://us-east-1/441186133046/models/openai/coding",
     ]
@@ -95,6 +114,12 @@ def test_google_model_port_uses_header_credential_and_maps_candidate_text() -> N
         {
             "responseId": "google-response-1",
             "candidates": [{"content": {"parts": [{"text": "Gemini review complete."}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "cachedContentTokenCount": 40,
+                "candidatesTokenCount": 20,
+                "thoughtsTokenCount": 5,
+            },
         },
     )
     port = GoogleGeminiModelPort(
@@ -113,6 +138,10 @@ def test_google_model_port_uses_header_credential_and_maps_candidate_text() -> N
     assert response.family == "google-gemini-flash"
     assert response.output == "Gemini review complete."
     assert response.provider_execution_id == "google-response-1"
+    assert response.usage is not None
+    assert response.usage.input_tokens == 60
+    assert response.usage.cached_input_tokens == 40
+    assert response.usage.output_tokens == 25
     assert transport.calls[0]["url"] == (
         "https://generativelanguage.test/v1beta/models/gemini-3.8-flash:generateContent"
     )
@@ -140,6 +169,11 @@ def test_bedrock_model_port_maps_converse_response() -> None:
     assert response.family == "anthropic-claude-fable"
     assert response.output == "Bedrock review complete."
     assert response.provider_execution_id == "bedrock-request-1"
+    assert response.usage is not None
+    assert response.usage.input_tokens == 50
+    assert response.usage.cached_input_tokens == 40
+    assert response.usage.cache_write_input_tokens == 10
+    assert response.usage.output_tokens == 20
     assert client.request == {
         "modelId": "anthropic.claude-opus-5",
         "messages": [{"role": "user", "content": [{"text": "Review this synthetic change."}]}],

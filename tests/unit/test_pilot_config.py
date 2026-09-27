@@ -36,3 +36,17 @@ def test_pilot_records_selected_exact_model_routes() -> None:
     )
     assert models["architecture_and_business"]["reviewer"]["provider"] == "aws-bedrock"
     assert models["architecture_and_business"]["reviewer"]["family"] == "amazon-nova-pro"
+
+
+def test_pilot_declares_provider_specific_context_and_input_ceilings() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    expected = {
+        ("coding", "doer"): (1_050_000, 922_000),
+        ("coding", "reviewer"): (1_048_576, 1_048_576),
+        ("architecture_and_business", "doer"): (1_050_000, 922_000),
+        ("architecture_and_business", "reviewer"): (300_000, 290_000),
+    }
+
+    for (capability, role), limits in expected.items():
+        route = config["models"][capability][role]
+        assert (route["context_window_tokens"], route["max_input_tokens"]) == limits

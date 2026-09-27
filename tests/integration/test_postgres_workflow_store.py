@@ -15,7 +15,7 @@ from nokinc_factory.adapters.postgres_workflow_schema import (
 from nokinc_factory.adapters.postgres_workflow_store import PostgresWorkflowStore
 from nokinc_factory.application.grounded_repository_discussion import ModelRunTelemetry
 from nokinc_factory.application.service import (
-    ChatModelBudgetExceeded,
+    ChatModelTurnLimitExceeded,
     ChatTurnAudit,
     ChatTurnReservation,
     GroundedAnalysisAudit,
@@ -218,7 +218,7 @@ def test_model_turn_budget_reservation_is_durable_and_tenant_scoped(database) ->
         now=NOW,
         message="another synthetic question",
     )
-    with pytest.raises(ChatModelBudgetExceeded):
+    with pytest.raises(ChatModelTurnLimitExceeded):
         PostgresWorkflowStore(worker).reserve_chat_turn(
             tenant_id=tenant,
             work_item_id=second.work_item_id,

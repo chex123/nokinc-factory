@@ -80,6 +80,19 @@ def test_reader_uses_app_token_for_exact_read_only_repository_request() -> None:
     assert transport.calls == [("GET", "/repos/NOK-Apps/flur-sdk")]
 
 
+def test_reader_can_bound_context_at_a_large_model_input_scale() -> None:
+    reader = GitHubAppRepositoryReader(
+        broker=FakeBroker(),
+        repositories=("NOK-Apps/flur-sdk",),
+        max_files=32,
+        max_file_bytes=32_000,
+        max_total_bytes=800_000,
+    )
+
+    assert reader._max_files == 32
+    assert reader._max_total_bytes == 800_000
+
+
 def test_reader_rejects_provider_identity_mismatch() -> None:
     reader = GitHubAppRepositoryReader(
         broker=FakeBroker(),

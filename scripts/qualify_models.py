@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping
-from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -18,7 +17,7 @@ from nokinc_factory.adapters.model_providers import (
     OpenAIModelPort,
 )
 from nokinc_factory.application.model_qualification_runner import (
-    QualificationBudget,
+    QualificationCallLimit,
     QualificationCase,
     QualificationRunner,
 )
@@ -118,8 +117,6 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--max-calls", type=int, default=4)
-    parser.add_argument("--max-estimated-cost-usd", default="20.00")
-    parser.add_argument("--estimated-cost-per-call-usd", default="5.00")
     parser.add_argument("--max-output-tokens", type=int, default=256)
     return parser.parse_args()
 
@@ -131,11 +128,7 @@ def main() -> int:
         if not isinstance(config, dict):
             raise ValueError("pilot config must be a YAML object")
         cases = _cases(config, region=args.region, max_output_tokens=args.max_output_tokens)
-        budget = QualificationBudget(
-            max_calls=args.max_calls,
-            max_estimated_cost_usd=Decimal(args.max_estimated_cost_usd),
-            estimated_cost_per_call_usd=Decimal(args.estimated_cost_per_call_usd),
-        )
+        call_limit = QualificationCallLimit(max_calls=args.max_calls)
         request = ModelRequest(
             role="qualification",
             prompt=(
@@ -144,7 +137,10 @@ def main() -> int:
             ),
             context_digest="sha256:" + "3" * 64,
         )
-        report = QualificationRunner(budget).run(cases, request)
+        report = QualificationRunner(
+            call_limit,
+            pricing_region=args.region,
+        ).run(cases, request)
         output = report.as_dict()
         output["region"] = args.region
         output["models_configured"] = len(cases)

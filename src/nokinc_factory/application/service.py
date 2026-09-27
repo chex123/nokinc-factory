@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from nokinc_factory.application.business_analyst import BusinessAnalystResult
 from nokinc_factory.application.chat_roles import (
+    MAX_MODEL_CALLS_PER_TURN,
     AgentRole,
     AnalysisProfile,
     ChatMode,
@@ -296,7 +297,10 @@ class GroundedAnalysisAudit(ReviewModel):
     status: Literal["ANSWERED", "NEEDS_CLARIFICATION"]
     default_branch: str = Field(min_length=1, max_length=255)
     context_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    model_runs: tuple[ModelRunTelemetry, ...] = Field(min_length=2, max_length=2)
+    model_runs: tuple[ModelRunTelemetry, ...] = Field(
+        min_length=2,
+        max_length=MAX_MODEL_CALLS_PER_TURN,
+    )
     elapsed_ms: int = Field(ge=0)
 
 
@@ -314,7 +318,10 @@ class ChatTurnAudit(ReviewModel):
     history_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     response_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     context_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    model_runs: tuple[ModelRunTelemetry, ...] = Field(min_length=2, max_length=2)
+    model_runs: tuple[ModelRunTelemetry, ...] = Field(
+        min_length=2,
+        max_length=MAX_MODEL_CALLS_PER_TURN,
+    )
     elapsed_ms: int = Field(ge=0)
 
 
@@ -329,11 +336,16 @@ class ChatTurnReservation(ReviewModel):
     )
     input_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     history_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    model_call_count: int = Field(default=2, strict=True, ge=2, le=2)
+    model_call_count: int = Field(
+        default=MAX_MODEL_CALLS_PER_TURN,
+        strict=True,
+        ge=2,
+        le=MAX_MODEL_CALLS_PER_TURN,
+    )
 
 
-class ChatModelBudgetExceeded(ValueError):
-    """The tenant's explicit live model-invocation allowance is exhausted."""
+class ChatModelTurnLimitExceeded(ValueError):
+    """The tenant's explicit chat-turn count is exhausted, independent of spend."""
 
 
 class WorkflowEvent(ReviewModel):
@@ -518,7 +530,7 @@ class InMemoryWorkflowStore:
         now: datetime,
     ) -> WorkflowEvent:
         if limit <= 0:
-            raise ChatModelBudgetExceeded("Model-backed chat is disabled by budget policy")
+            raise ChatModelTurnLimitExceeded("Model-backed chat is disabled by turn-limit policy")
         with self._lock:
             key = (tenant_id, work_item_id)
             item = self._items.get(key)
@@ -531,7 +543,7 @@ class InMemoryWorkflowStore:
                 for event in events
             )
             if used >= limit:
-                raise ChatModelBudgetExceeded("Tenant chat model-turn budget exhausted")
+                raise ChatModelTurnLimitExceeded("Tenant chat-turn limit exhausted")
             event = WorkflowEvent(
                 event_id=f"evt-{uuid4().hex}",
                 tenant_id=tenant_id,
@@ -1149,11 +1161,11 @@ def create_app(*, auth_secret: bytes | None = None, issuer: str = "",
                 limit=chat_model_turn_limit,
                 now=now(),
             )
-        except ChatModelBudgetExceeded:
+        except ChatModelTurnLimitExceeded:
             raise HTTPException(
                 status_code=429,
                 detail={
-                    "code": "CHAT_MODEL_TURN_BUDGET_EXHAUSTED",
+                    "code": "CHAT_MODEL_TURN_LIMIT_REACHED",
                     "work_item_id": item.work_item_id,
                 },
             ) from None

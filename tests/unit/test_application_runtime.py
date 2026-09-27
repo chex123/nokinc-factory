@@ -287,6 +287,7 @@ def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkey
     class FakeSourceReader:
         def __init__(self, *, repositories: tuple[str, ...], **kwargs: object) -> None:
             self.repositories = repositories
+            self.options = kwargs
 
         def read_codebase_context(self, repository: str, question: str) -> RepositoryCodeContext:
             source = RepositorySourceFile(
@@ -323,6 +324,9 @@ def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkey
     )
     assert app.state.github_app_broker is not None
     assert app.state.github_repository_reader is not None
+    assert app.state.github_repository_reader.options["max_files"] == 32
+    assert app.state.github_repository_reader.options["max_file_bytes"] == 32_000
+    assert app.state.github_repository_reader.options["max_total_bytes"] == 800_000
     assert app.state.grounded_discussion is not None
     assert app.state.business_analyst is not None
     assert app.state.chat_model_turn_limit == 2

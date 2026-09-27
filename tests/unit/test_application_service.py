@@ -14,6 +14,7 @@ from nokinc_factory.application.grounded_repository_discussion import (
     ModelRunTelemetry,
     SourceCitation,
 )
+from nokinc_factory.application.model_pricing import ModelCostEstimate
 from nokinc_factory.application.service import (
     HmacTokenIssuer,
     InMemoryWorkflowStore,
@@ -21,6 +22,7 @@ from nokinc_factory.application.service import (
     create_app,
 )
 from nokinc_factory.domain.review_base import content_digest
+from nokinc_factory.ports.model import ModelUsage
 
 SECRET = b"unit-test-secret-with-enough-entropy"
 NOW = datetime(2026, 9, 20, 12, tzinfo=UTC)
@@ -352,6 +354,17 @@ def test_chat_runs_grounded_repository_discussion_only_for_operator() -> None:
                         family="openai-astra", provider_execution_id="doer-run",
                         request_digest="sha256:" + "b" * 64,
                         response_digest="sha256:" + "c" * 64, latency_ms=120,
+                        usage=ModelUsage(
+                            input_tokens=100,
+                            cached_input_tokens=20,
+                            output_tokens=10,
+                        ),
+                        list_price_cost=ModelCostEstimate(
+                            cost_nanodollars=1_520_000,
+                            price_card_id="openai-2026-09",
+                            source_url="https://developers.openai.com/api/docs/models/gpt-6-astra",
+                            priced_on=NOW.date(),
+                        ),
                     ),
                     ModelRunTelemetry(
                         stage="independent-review", provider="aws-bedrock",
@@ -414,6 +427,7 @@ def test_chat_runs_grounded_repository_discussion_only_for_operator() -> None:
         "CHAT_TURN_RESERVED",
         "CHAT_TURN_RECORDED",
     ]
+    assert trace["events"][1]["chat_turn_reservation"]["model_call_count"] == 6
     telemetry = trace["events"][2]["chat_turn_audit"]
     assert telemetry["analysis_profile"] == "architecture"
     assert telemetry["repository"] == "NOK-Apps/flur-frontend"
@@ -423,6 +437,8 @@ def test_chat_runs_grounded_repository_discussion_only_for_operator() -> None:
     assert telemetry["model_runs"][1]["provider_execution_id"] == "review-run"
     assert telemetry["model_runs"][0]["latency_ms"] == 120
     assert telemetry["model_runs"][1]["request_digest"] == "sha256:" + "d" * 64
+    assert telemetry["model_runs"][0]["usage"]["output_tokens"] == 10
+    assert telemetry["model_runs"][0]["list_price_cost"]["cost_nanodollars"] == 1_520_000
     assert "prompt" not in telemetry and "claims" not in telemetry
     tampered_event = dict(trace["events"][2])
     tampered_audit = dict(tampered_event["chat_turn_audit"])
@@ -722,7 +738,7 @@ def test_chat_provider_failure_logs_only_allowlisted_diagnostic_code(caplog) -> 
     assert provider_message not in caplog.text
 
 
-def test_chat_model_turn_budget_is_reserved_before_provider_call() -> None:
+def test_chat_model_turn_limit_is_reserved_before_provider_call() -> None:
     class FakeBusinessAnalyst:
         def __init__(self) -> None:
             self.calls = 0
@@ -793,7 +809,7 @@ def test_chat_model_turn_budget_is_reserved_before_provider_call() -> None:
 
     assert first.status_code == 202
     assert second.status_code == 429
-    assert second.json()["detail"]["code"] == "CHAT_MODEL_TURN_BUDGET_EXHAUSTED"
+    assert second.json()["detail"]["code"] == "CHAT_MODEL_TURN_LIMIT_REACHED"
     assert analyst.calls == 1
     trace = api.get(
         f"/v1/work-items/{work_item_id}/trace",

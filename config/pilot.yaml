@@ -57,12 +57,16 @@ models:
       runtime: native-provider-api-from-aws
       credential_ref: "aws-secretsmanager://us-east-1/441186133046/models/openai/coding"
       exact_model_id: "gpt-5.6-luna"
+      context_window_tokens: 1050000
+      max_input_tokens: 922000
     reviewer:
       family: google-gemini-flash
       provider: google
       runtime: native-google-api
       credential_ref: "aws-secretsmanager://us-east-1/441186133046/models/google/coding-reviewer"
       exact_model_id: "gemini-3.8-flash"
+      context_window_tokens: 1048576
+      max_input_tokens: 1048576
   architecture_and_business:
     doer:
       family: openai-astra
@@ -70,9 +74,13 @@ models:
       runtime: native-provider-api-from-aws
       credential_ref: "aws-secretsmanager://us-east-1/441186133046/models/openai/architecture-business"
       exact_model_id: "gpt-6-astra"
+      context_window_tokens: 1050000
+      max_input_tokens: 922000
     reviewer:
       family: amazon-nova-pro
       provider: aws-bedrock
       runtime: bedrock-runtime
       credential_ref: "iam-role://factory-model-runtime/bedrock"
       exact_model_id: "amazon.nova-pro-v1:0"
+      context_window_tokens: 300000
+      max_input_tokens: 290000

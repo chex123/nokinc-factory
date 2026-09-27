@@ -21,7 +21,7 @@ from nokinc_factory.adapters.postgres_workflow_schema import (
     workflow_outbox,
 )
 from nokinc_factory.application.service import (
-    ChatModelBudgetExceeded,
+    ChatModelTurnLimitExceeded,
     ChatTurnAudit,
     ChatTurnReservation,
     GateDecision,
@@ -226,7 +226,7 @@ class PostgresWorkflowStore:
         now: datetime,
     ) -> WorkflowEvent:
         if limit <= 0:
-            raise ChatModelBudgetExceeded("Model-backed chat is disabled by budget policy")
+            raise ChatModelTurnLimitExceeded("Model-backed chat is disabled by turn-limit policy")
         event = WorkflowEvent(
             event_id=f"evt-{uuid4().hex}",
             tenant_id=tenant_id,
@@ -255,7 +255,7 @@ class PostgresWorkflowStore:
                 workflow_events.c.kind == "CHAT_TURN_RESERVED",
             ))
             if int(used or 0) >= limit:
-                raise ChatModelBudgetExceeded("Tenant chat model-turn budget exhausted")
+                raise ChatModelTurnLimitExceeded("Tenant chat-turn limit exhausted")
             connection.execute(text(
                 "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"
             ), {"key": f"{tenant_id}:{work_item_id}"})

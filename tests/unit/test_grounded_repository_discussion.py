@@ -43,10 +43,11 @@ class FakeSourceReader:
 
 
 class FakeModel:
-    def __init__(self, *, model: str, family: str, output: str) -> None:
+    def __init__(self, *, model: str, family: str, output: str | tuple[str, ...]) -> None:
         self.model = model
         self.family = family
-        self.output = output
+        self.outputs = list(output) if isinstance(output, tuple) else [output]
+        self.last_output = self.outputs[-1]
         self.requests: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelResponse:
@@ -55,7 +56,7 @@ class FakeModel:
             status=ModelStatus.COMPLETED,
             model=self.model,
             family=self.family,
-            output=self.output,
+            output=self.outputs.pop(0) if self.outputs else self.last_output,
             provider_execution_id=f"run-{len(self.requests)}",
         )
 
@@ -80,18 +81,24 @@ def _discussion(
     *,
     draft: str | None = None,
     review: str | None = None,
+    draft_sequence: tuple[str, ...] | None = None,
+    review_sequence: tuple[str, ...] | None = None,
     reviewer_family: str = "amazon-nova-pro",
 ) -> tuple[GroundedRepositoryDiscussion, FakeSourceReader, FakeModel, FakeModel]:
     source = FakeSourceReader()
     doer = FakeModel(
         model="gpt-6-astra",
         family="openai-astra",
-        output=draft or _draft(),
+        output=draft_sequence or (draft or _draft(),),
     )
     reviewer = FakeModel(
         model="amazon.nova-pro-v1:0",
         family=reviewer_family,
-        output=review or json.dumps({"supported": True, "issues": [], "open_questions": []}),
+        output=review_sequence or (review or json.dumps({
+            "supported": True,
+            "issues": [],
+            "open_questions": [],
+        }),),
     )
     discussion = GroundedRepositoryDiscussion(
         source_reader=source,
@@ -122,6 +129,78 @@ def test_discussion_returns_only_independently_reviewed_cited_claims() -> None:
     assert result.context_digest == source.context.context_digest
     assert len(doer.requests) == 1 and len(reviewer.requests) == 1
     assert doer.requests[0].context_digest == reviewer.requests[0].context_digest
+
+
+@pytest.mark.parametrize(
+    ("model", "family", "provider", "stage", "limit"),
+    [
+        ("gpt-6-astra", "openai-astra", "openai", "architect", 922_000),
+        (
+            "amazon.nova-pro-v1:0",
+            "amazon-nova-pro",
+            "aws-bedrock",
+            "independent-review",
+            290_000,
+        ),
+    ],
+)
+def test_prompt_respects_each_models_documented_input_limit(
+    model: str,
+    family: str,
+    provider: str,
+    stage: str,
+    limit: int,
+) -> None:
+    discussion, _, doer, reviewer = _discussion()
+    model_port = reviewer if provider == "aws-bedrock" else doer
+
+    with pytest.raises(ValueError, match="model input token ceiling"):
+        discussion._invoke(
+            model_port,
+            stage=stage,
+            provider=provider,
+            role="context_limit_test",
+            prompt="x" * (limit + 1),
+            context_digest=content_digest("context-limit-test"),
+            expected_model=model,
+            expected_family=family,
+        )
+
+    assert model_port.requests == []
+
+
+def test_source_context_preflights_against_smaller_model_in_the_pair() -> None:
+    discussion, source, doer, reviewer = _discussion()
+    auth_source = RepositorySourceFile(
+        path="apps/web/src/auth.ts",
+        blob_sha="1" * 40,
+        content_digest=content_digest(SOURCE + "x" * (32_000 - len(SOURCE))),
+        text=SOURCE + "x" * (32_000 - len(SOURCE)),
+    )
+    large_sources = (auth_source,) + tuple(
+        RepositorySourceFile(
+            path=f"src/large-{index}.ts",
+            blob_sha=f"{index + 2:040x}",
+            content_digest=content_digest("x" * 32_000),
+            text="x" * 32_000,
+        )
+        for index in range(7)
+    )
+    source.context = RepositoryCodeContext(
+        repository=REPOSITORY,
+        default_branch="main",
+        tree_sha="e" * 40,
+        context_digest=content_digest([
+            item.content_digest for item in large_sources
+        ]),
+        files=large_sources,
+    )
+
+    with pytest.raises(ValueError, match="paired model input limit"):
+        discussion.answer(repository=REPOSITORY, question="Review the large source context.")
+
+    assert doer.requests == []
+    assert reviewer.requests == []
 
 
 def test_discussion_combines_repositories_and_scopes_same_path_citations() -> None:
@@ -225,7 +304,7 @@ def test_discussion_rejects_a_quote_not_present_at_its_cited_lines() -> None:
 
 
 def test_independent_reviewer_can_withhold_an_unsupported_answer() -> None:
-    discussion, _, _, _ = _discussion(
+    discussion, _, doer, reviewer = _discussion(
         review=json.dumps({
             "supported": False,
             "issues": ["The repository evidence does not support the claim."],
@@ -238,6 +317,33 @@ def test_independent_reviewer_can_withhold_an_unsupported_answer() -> None:
     assert result.status == "NEEDS_CLARIFICATION"
     assert result.claims == ()
     assert result.open_questions == ("Inspect the mobile authentication flow.",)
+    assert len(doer.requests) == 3
+    assert len(reviewer.requests) == 3
+    assert len(result.model_runs) == 6
+
+
+def test_architect_refines_against_independent_review_before_answering() -> None:
+    first_review = json.dumps({
+        "supported": False,
+        "issues": ["The summary overstates what the cited line proves."],
+        "open_questions": [],
+    })
+    accepted_review = json.dumps({"supported": True, "issues": [], "open_questions": []})
+    discussion, _, doer, reviewer = _discussion(
+        draft_sequence=(_draft(), _draft()),
+        review_sequence=(first_review, accepted_review),
+    )
+
+    result = discussion.answer(
+        repository=REPOSITORY,
+        question="Where is the auth token stored?",
+    )
+
+    assert result.status == "ANSWERED"
+    assert len(doer.requests) == 2
+    assert len(reviewer.requests) == 2
+    assert len(result.model_runs) == 4
+    assert "overstates what the cited line proves" in doer.requests[1].prompt
 
 
 def test_discussion_requires_model_family_independence() -> None:

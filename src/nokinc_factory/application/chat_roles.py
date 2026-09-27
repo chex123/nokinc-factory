@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 ChatMode = Literal["auto", "business", "architecture", "coding"]
 AgentRole = Literal["business_analyst", "architect", "code_analyst"]
 AnalysisProfile = Literal["architecture", "coding"]
+MAX_DOER_REVIEW_ROUNDS = 3
+MAX_MODEL_CALLS_PER_TURN = MAX_DOER_REVIEW_ROUNDS * 2
 
 _ARCHITECTURE_SIGNALS = re.compile(
     r"\b(architect(?:ure)?|system design|data flow|service boundary|"
