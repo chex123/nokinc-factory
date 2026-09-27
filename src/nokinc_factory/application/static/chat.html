@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Factory | Nokinc</title>
+  <link rel="stylesheet" href="/static/chat.css">
+  <script type="module" src="/static/chat.js"></script>
+</head>
+<body>
+  <div class="workspace">
+    <aside class="sidebar" id="sidebar" aria-label="Workspace">
+      <a class="brand" href="/chat" aria-label="Nokinc Factory">nokinc<span>factory</span></a>
+      <button id="new-chat" class="new-chat" type="button">New conversation</button>
+      <div class="section-label">Conversations</div>
+      <nav id="conversations" aria-label="Conversations"></nav>
+      <div class="sidebar-footer">
+        <span class="connection" id="connection">Connecting</span>
+        <a id="account-action" href="/auth/login">Sign in</a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button id="menu-toggle" type="button" aria-label="Toggle conversations" aria-expanded="false">Menu</button>
+        <div><span class="section-label">Workspace</span><h1 id="conversation-title">New conversation</h1></div>
+        <span class="session-state" id="session-state">Connecting</span>
+      </header>
+      <div class="notice" id="notice" role="status" hidden></div>
+      <section class="conversation" aria-label="Conversation">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-mark" aria-hidden="true">N</div>
+          <h2>What are we working on?</h2>
+        </div>
+        <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <div id="pending" class="pending" role="status" hidden>Waiting for a response</div>
+      </section>
+      <footer class="composer-area">
+        <form id="chat-form">
+          <div class="composer-options">
+            <label for="repositories">Repositories</label>
+            <select id="repositories" name="repositories" multiple size="3"></select>
+            <label for="mode">Role</label>
+            <select id="mode">
+              <option value="auto">Automatic</option>
+              <option value="business">Business analyst</option>
+              <option value="architecture">Architect</option>
+              <option value="coding">Code analyst</option>
+            </select>
+          </div>
+          <label class="visually-hidden" for="message">Message</label>
+          <textarea id="message" name="message" rows="3" maxlength="20000" placeholder="Message Factory" required disabled></textarea>
+          <div class="composer-bottom">
+            <span id="composer-status">Connecting</span>
+            <button id="send" type="submit" aria-label="Send message" disabled>Send</button>
+          </div>
+        </form>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

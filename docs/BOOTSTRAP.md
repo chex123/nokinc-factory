@@ -78,6 +78,28 @@ Add `--factory-public` only if you intentionally want the factory repo public or
 
 ## Why the privileged review split matters
 
+### Explicit task identity (20 September 2026)
+
+The factory's review workflow requires this exact first line in each PR body:
+
+```text
+Factory-Task: https://github.com/OWNER/REPOSITORY/issues/NUMBER
+```
+
+Use the repository identity exactly as GitHub reports it, a canonical positive
+issue number, and no query, fragment, credentials or URL aliases. Exactly one
+declaration is allowed; LF, CRLF and CR line endings are recognized. The issue
+must belong to the PR repository and must not be a pull request. Cross-repository
+task access requires a separately authorized future capability and is rejected
+here. The remaining body is prose, not an alternative source of task identity.
+
+This is a deliberate replacement of free-text `#number` guessing. Existing PRs
+need their declaration updated before the revised workflow can review them.
+The issue remains untrusted evidence data, not authorization. These local
+changes have not been published or propagated to the demo target workflows.
+
+### Privileged execution boundary
+
 A same-repository PR can contain model-generated code. Secrets must not be available to any job that checks out or executes that code. The privileged reviewer therefore:
 
 - is defined on the trusted default branch;

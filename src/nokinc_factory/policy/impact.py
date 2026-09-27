@@ -19,6 +19,12 @@ so it never matched ``order.owner``.
 Until RI-backed classification lands, these patterns favour RECALL over
 precision. A false positive costs one extra review. A false negative ships a
 deleted authorization check.
+
+Impacts are unioned per file. Only recognized language-specific line comments
+without directive-like payloads qualify as cosmetic. JS/TS ``@`` and ``eslint-``
+payloads, Ruby magic/checker names and known Go/Python pragmas are material
+even when their syntax or placement is ambiguous. This conservative screening
+is not a complete tool parser; docstrings and block comments need source context.
 """
 
 from __future__ import annotations
@@ -103,7 +109,28 @@ INVALIDATES: dict[ImpactClass, frozenset[Evidence]] = {
     ImpactClass.UNCLASSIFIABLE: frozenset(Evidence),
 }
 
-_COMMENT_STARTS: tuple[str, ...] = ("#", "//", "/*", "*", '"""', "'''")
+_LINE_COMMENTS: dict[str, tuple[str, ...]] = {
+    **dict.fromkeys((".py", ".rb", ".yaml", ".yml", ".toml"), ("#",)),
+    **dict.fromkeys((".ts", ".tsx", ".js", ".jsx", ".java", ".go", ".cs"), ("//",)),
+    ".tf": ("#", "//"),
+}
+
+# Without source positions, compiler/interpreter/checker directives cannot be proved inert.
+_COMMENT_DIRECTIVES: dict[str, re.Pattern[str]] = {
+    ".go": re.compile(r"//(?:go:|\s*\+build(?:\s|$))"),
+    ".py": re.compile(
+        r"#(?:!|[ \t]*(?:type:|(?:mypy|pyright|ruff|flake8|pylint)[ \t]*:|"
+        r"(?i:noqa)\b)|.*?coding[:=])"
+    ),
+    ".rb": re.compile(
+        r"#(?:\s*!|.*(?:coding|frozen[_-]string[_-]literal|"
+        r"warn[_-]indent|shareable[_-]constant[_-]value|rubocop))", re.IGNORECASE,
+    ),
+    **dict.fromkeys(
+        (".ts", ".tsx", ".js", ".jsx"),
+        re.compile(r"//.*(?:@|eslint-)"),
+    ),
+}
 
 
 class SecuritySensitiveRegistry(BaseModel):
@@ -187,11 +214,28 @@ class FileChange(BaseModel):
 
     @property
     def is_cosmetic(self) -> bool:
-        """Comment or docstring only. Coarse -- replace with an AST diff via RI."""
+        """Accept only line comments; an apparent docstring can execute code.
+
+        Strip at most one matching diff marker, never source operators. Inspect
+        every physical line even when a caller supplies a multiline entry.
+        """
+        suffix = "." + self.path.rsplit(".", 1)[-1] if "." in self.path else ""
+        prefixes = _LINE_COMMENTS.get(suffix)
+        if prefixes is None:
+            return False
         lines = [
-            ln.lstrip("+- \t") for ln in self.added_lines + self.removed_lines if ln.strip(" \t+-")
+            line.removeprefix(marker).lstrip(" \t")
+            for marker, entries in (("+", self.added_lines), ("-", self.removed_lines))
+            for entry in entries
+            for line in entry.splitlines()
         ]
-        return bool(lines) and all(ln.startswith(_COMMENT_STARTS) for ln in lines)
+        nonblank = [line for line in lines if line.strip()]
+        directive = _COMMENT_DIRECTIVES.get(suffix)
+        if directive is not None and any(directive.match(line) for line in nonblank):
+            return False
+        if suffix == ".java" and any(r"\u" in line for line in nonblank):
+            return False  # Java expands Unicode escapes before recognizing comments.
+        return bool(nonblank) and all(line.startswith(prefixes) for line in nonblank)
 
 
 class ImpactResult(BaseModel):
@@ -241,24 +285,30 @@ def classify(
 
         if change.is_cosmetic:
             classes.add(ImpactClass.COSMETIC)
-            why.append(f"{change.path}: comment or docstring only")
+            why.append(f"{change.path}: recognized line comments only")
             continue
 
+        file_classes: set[ImpactClass] = set()
         if registry.path_is_sensitive(change.path):
-            classes.add(ImpactClass.SECURITY_SENSITIVE)
+            file_classes.add(ImpactClass.SECURITY_SENSITIVE)
             why.append(f"{change.path}: in a security-sensitive path")
 
         for name in sorted(registry.matched_patterns(change.diff_text)):
-            classes.add(_PATTERN_TO_CLASS.get(name, ImpactClass.SECURITY_SENSITIVE))
+            file_classes.add(_PATTERN_TO_CLASS.get(name, ImpactClass.SECURITY_SENSITIVE))
             why.append(f"{change.path}: matched '{name}'")
 
         if change.path.endswith(".tf"):
-            classes.add(ImpactClass.IAC_CHANGED)
+            file_classes.add(ImpactClass.IAC_CHANGED)
             why.append(f"{change.path}: infrastructure as code")
         normalized_path = "/" + change.path.lstrip("./")
         if "/migrations/" in normalized_path or change.path.endswith(".sql"):
-            classes.add(ImpactClass.DB_MIGRATION)
+            file_classes.add(ImpactClass.DB_MIGRATION)
             why.append(f"{change.path}: database migration")
+
+        if not file_classes:
+            file_classes.add(ImpactClass.ORDINARY_IMPLEMENTATION)
+            why.append(f"{change.path}: no sensitive signal detected")
+        classes.update(file_classes)
 
     if not classes:
         classes.add(ImpactClass.ORDINARY_IMPLEMENTATION)

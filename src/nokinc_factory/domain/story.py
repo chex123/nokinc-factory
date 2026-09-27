@@ -4,6 +4,8 @@ Gate 1 answers "do we understand what needs to be done?" -- no architecture.
 Gate 2 answers "do we approve this solution?" -- architecture required.
 
 Requiring architecture at Gate 1 is circular: the Architect runs after it.
+Spec Part 5: open questions and blank declared facts are not ready. Optional
+collections may remain empty; validation never invents facts or normalizes text.
 """
 
 from __future__ import annotations
@@ -11,6 +13,13 @@ from __future__ import annotations
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def _nonblank(value: str) -> str:
+    """Reject missing content without changing the bytes of an established fact."""
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
 
 
 class RiskTier(StrEnum):
@@ -34,12 +43,22 @@ class Scenario(BaseModel):
     gherkin: str
     is_failure_case: bool = False
 
+    @field_validator("name", "gherkin")
+    @classmethod
+    def _content_required(cls, value: str) -> str:
+        return _nonblank(value)
+
 
 class TestDataNeed(BaseModel):
     description: str
     source: str = Field(description="synthetic | masked | fixture | generator name")
     volume: str
     sensitivity: DataClassification = DataClassification.NONE
+
+    @field_validator("description", "source", "volume")
+    @classmethod
+    def _content_required(cls, value: str) -> str:
+        return _nonblank(value)
 
 
 class NonFunctionalTarget(BaseModel):
@@ -48,6 +67,11 @@ class NonFunctionalTarget(BaseModel):
     metric: str
     target: str
     unchanged: bool = False
+
+    @field_validator("metric", "target")
+    @classmethod
+    def _content_required(cls, value: str) -> str:
+        return _nonblank(value)
 
 
 class BusinessReady(BaseModel):
@@ -73,6 +97,25 @@ class BusinessReady(BaseModel):
         description="Unknowns the Domain Expert marked rather than assumed away.",
     )
 
+    @field_validator("work_item_id", "problem_and_value", "rough_size", "size_confidence")
+    @classmethod
+    def _content_required(cls, value: str) -> str:
+        return _nonblank(value)
+
+    @field_validator("scope_in", "scope_out", "business_rules", "known_constraints")
+    @classmethod
+    def _entries_required(cls, values: list[str]) -> list[str]:
+        for value in values:
+            _nonblank(value)
+        return values
+
+    @field_validator("open_questions")
+    @classmethod
+    def _no_unresolved_questions(cls, values: list[str]) -> list[str]:
+        if values:
+            raise ValueError("open_questions must be resolved before Business Ready")
+        return values
+
     @field_validator("scenarios")
     @classmethod
     def _needs_a_failure_case(cls, v: list[Scenario]) -> list[Scenario]:
@@ -83,11 +126,13 @@ class BusinessReady(BaseModel):
             )
         return v
 
-    @field_validator("scope_out")
+    @field_validator("scope_in", "scope_out")
     @classmethod
-    def _scope_out_not_empty(cls, v: list[str]) -> list[str]:
+    def _scope_not_empty(cls, v: list[str]) -> list[str]:
         if not v:
-            raise ValueError("scope_out must be explicit; an empty exclusion list is not a scope")
+            raise ValueError(
+                "scope_in and scope_out must be explicit; an empty list is not a scope"
+            )
         return v
 
 

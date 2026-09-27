@@ -1,12 +1,15 @@
 """TaskContext loader boundary tests for Slice A preflight."""
 
 import json
+from subprocess import CalledProcessError
 
 import pytest
 
+import nokinc_factory.adapters.github_task_context as github_task_context
 from nokinc_factory.adapters.github_task_context import (
     GitHubCliCommandError,
     GitHubIssueTaskContextLoader,
+    SubprocessGitHubCliRunner,
     TaskContextAuthenticationError,
     TaskContextNotFound,
     TaskContextProviderError,
@@ -76,6 +79,17 @@ def test_invalid_task_context_id_fails_before_provider_call(work_item_id: str) -
     assert runner.calls == []
 
 
+@pytest.mark.parametrize("repository", ["owner", "owner/", "/repository", "owner/repository/extra"])
+def test_invalid_repository_constructor_value_fails_closed(repository: str) -> None:
+    with pytest.raises(ValueError, match="owner/name"):
+        GitHubIssueTaskContextLoader(repository)
+
+
+def test_invalid_web_host_constructor_value_fails_closed() -> None:
+    with pytest.raises(ValueError, match="hostname"):
+        GitHubIssueTaskContextLoader("acme/factory", web_host="https://github.com")
+
+
 def test_nonexistent_task_context_fails_closed() -> None:
     loader = GitHubIssueTaskContextLoader(
         "acme/factory",
@@ -112,6 +126,53 @@ def test_task_context_repository_mismatch_is_distinct() -> None:
 
     with pytest.raises(TaskContextRepositoryMismatch):
         loader.load("6")
+
+
+def test_returned_issue_number_mismatch_fails_closed() -> None:
+    loader = GitHubIssueTaskContextLoader(
+        "acme/factory",
+        runner=FakeGitHubCli(_issue_payload(number=7)),
+    )
+
+    with pytest.raises(TaskContextRepositoryMismatch, match="identity mismatch"):
+        loader.load("6")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(b"\xff", id="invalid-utf8"),
+        pytest.param(b"{", id="malformed-json"),
+        pytest.param(b'{"number":NaN}', id="non-standard-json-constant"),
+    ],
+)
+def test_invalid_provider_response_fails_closed(payload: bytes) -> None:
+    loader = GitHubIssueTaskContextLoader("acme/factory", runner=FakeGitHubCli(payload))
+
+    with pytest.raises(TaskContextProviderError, match="response is invalid"):
+        loader.load("6")
+
+
+def test_subprocess_gh_executable_unavailable_is_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(*_arguments: object, **_kwargs: object) -> None:
+        raise FileNotFoundError
+
+    monkeypatch.setattr(github_task_context, "run", unavailable)
+
+    with pytest.raises(GitHubCliCommandError, match="executable is unavailable"):
+        SubprocessGitHubCliRunner().run(("issue", "view", "6"))
+
+
+def test_subprocess_gh_nonzero_exit_normalizes_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failed(*_arguments: object, **_kwargs: object) -> None:
+        raise CalledProcessError(1, "gh issue view", stderr=b"  service unavailable\n")
+
+    monkeypatch.setattr(github_task_context, "run", failed)
+
+    with pytest.raises(GitHubCliCommandError, match=r"^service unavailable$"):
+        SubprocessGitHubCliRunner().run(("issue", "view", "6"))
 
 
 @pytest.mark.parametrize(

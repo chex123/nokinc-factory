@@ -23,6 +23,8 @@ class GateName(StrEnum):
     COVERAGE = "coverage"
     MUTATION = "mutation"
     CONTRACT = "contract"
+    MOBILE_E2E = "mobile_e2e"
+    VISUAL = "visual"
 
 
 class GateStatus(StrEnum):

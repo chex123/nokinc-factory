@@ -1,0 +1,78 @@
+# Nonsecret pilot configuration for the organization-owned GitHub App.
+# Private keys, webhook secrets, model API keys, and vault credentials never belong here.
+version: 1
+
+github:
+  host: github.com
+  organization: NOK-Apps
+  alm: github-issues
+  issue_writes: true
+  human_users:
+    - chexudeze
+    - triplexapps
+    - chex123
+  approver_order:
+    - triplexapps
+    - chex123
+  app:
+    slug: nok-apps-factory-pilot
+    app_id: "5020848"
+    installation_id: "163491501"
+    private_key_ref: "aws-secretsmanager://us-east-1/441186133046/github/apps/nokinc-factory-pilot/private-key"
+    repositories:
+      - NOK-Apps/flur-sdk
+      - NOK-Apps/flur-frontend
+      - NOK-Apps/flur-backend
+    permissions:
+      actions: write
+      checks: write
+      commit_statuses: write
+      contents: write
+      issues: write
+      metadata: read
+      pull_requests: write
+      administration: none
+      repository_secrets: none
+      workflows: none
+  webhook:
+    enabled: false
+    secret_ref: "secret://github/apps/nok-apps-factory-pilot/webhook-secret"
+    reason: "No public authenticated factory webhook endpoint is deployed yet."
+
+secrets:
+  control_plane: aws-secrets-manager
+  region: us-east-1
+  account_id: "441186133046"
+  github_app_private_key_ref: "aws-secretsmanager://us-east-1/441186133046/github/apps/nokinc-factory-pilot/private-key"
+  github_webhook_secret_ref: "aws-secretsmanager://us-east-1/441186133046/github/apps/nokinc-factory-pilot/webhook-secret"
+  note: "Secret values are never stored in this file."
+
+models:
+  status: "PENDING_PROVIDER_QUALIFICATION"
+  routing_principle: "Use AWS as the control-plane vault; invoke each model through its native provider runtime."
+  coding:
+    doer:
+      family: openai-luna
+      provider: openai
+      runtime: native-provider-api-from-aws
+      credential_ref: "aws-secretsmanager://us-east-1/441186133046/models/openai/coding"
+      exact_model_id: "gpt-5.6-luna"
+    reviewer:
+      family: google-gemini-flash
+      provider: google
+      runtime: native-google-api
+      credential_ref: "aws-secretsmanager://us-east-1/441186133046/models/google/coding-reviewer"
+      exact_model_id: "gemini-3.8-flash"
+  architecture_and_business:
+    doer:
+      family: openai-astra
+      provider: openai
+      runtime: native-provider-api-from-aws
+      credential_ref: "aws-secretsmanager://us-east-1/441186133046/models/openai/architecture-business"
+      exact_model_id: "gpt-6-astra"
+    reviewer:
+      family: amazon-nova-pro
+      provider: aws-bedrock
+      runtime: bedrock-runtime
+      credential_ref: "iam-role://factory-model-runtime/bedrock"
+      exact_model_id: "amazon.nova-pro-v1:0"

@@ -1,37 +1,145 @@
 name: gate-approval
 
-# Stage-0 ApprovalPort: the workflow run is the immutable provider evidence.
-# The environment review approves this exact run, whose inputs bind the work item
-# and decision digest. The label is business state only; it is applied AFTER approval.
+# Approval is enforced by GitHub Environment protection configured in repository settings.
+# This workflow only records a run reference; it does not authorize deployments or merges.
 on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: Work item / issue number
+        description: GitHub issue number for the work item
         required: true
         type: string
       gate:
-        description: Protected gate environment
+        description: Protected gate
         required: true
         type: choice
         options: [gate-1, gate-2, gate-3, gate-4]
       decision_digest:
-        description: sha256 digest of the exact BusinessReady/SolutionReady/release decision being approved
+        description: sha256 digest of the exact decision being reviewed
         required: true
         type: string
 
 permissions:
   contents: read
-  issues: write
+  issues: read
+
+concurrency:
+  group: gate-approval-${{ inputs.issue_number }}-${{ inputs.gate }}
+  cancel-in-progress: false
 
 jobs:
-  approve:
-    name: protected-gate-approval
+  preflight:
+    name: validate-request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: validate issue, gate, digest, and dispatch branch
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          GATE: ${{ inputs.gate }}
+          DECISION_DIGEST: ${{ inputs.decision_digest }}
+          WORKFLOW_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const issueNumberText = process.env.ISSUE_NUMBER;
+            const issue_number = Number(issueNumberText);
+            const gate = process.env.GATE;
+            const digest = process.env.DECISION_DIGEST;
+            const gates = ['gate-1', 'gate-2', 'gate-3', 'gate-4'];
+            if (!/^[1-9][0-9]*$/.test(issueNumberText) || !Number.isSafeInteger(issue_number)) {
+              core.setFailed('invalid issue number');
+              return;
+            }
+            if (!gates.includes(gate)) {
+              core.setFailed('unsupported gate');
+              return;
+            }
+            if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+              core.setFailed('decision digest must be canonical sha256 hex');
+              return;
+            }
+            if (process.env.WORKFLOW_REF !== `refs/heads/${process.env.DEFAULT_BRANCH}`) {
+              core.setFailed('approval workflow must run from the repository default branch');
+              return;
+            }
+            if (['triplexapps', 'chex123'].includes(context.actor.toLowerCase())) {
+              core.setFailed('an approver cannot initiate their own approval workflow');
+              return;
+            }
+            try {
+              const issue = await github.rest.issues.get({ ...context.repo, issue_number });
+              if (issue.data.pull_request) {
+                core.setFailed('approval target must be an issue, not a pull request');
+                return;
+              }
+              const reviewerEnvironments = [
+                { login: 'triplexapps', environment: `${gate}-triplexapps` },
+                { login: 'chex123', environment: `${gate}-chex123` },
+              ];
+              for (const expected of reviewerEnvironments) {
+                const result = await github.rest.repos.getEnvironment({
+                  ...context.repo,
+                  environment_name: expected.environment,
+                });
+                const rule = result.data.protection_rules?.find(
+                  item => item.type === 'required_reviewers'
+                );
+                if (!rule || rule.prevent_self_review !== true) {
+                  core.setFailed(`environment ${expected.environment} must require reviewers and prevent self-review`);
+                  return;
+                }
+                const expectedUser = await github.rest.users.getByUsername({ username: expected.login });
+                const configured = rule.reviewers ?? [];
+                if (
+                  configured.length !== 1 ||
+                  configured[0].type !== 'User' ||
+                  configured[0].reviewer?.id !== expectedUser.data.id
+                ) {
+                  core.setFailed(`environment ${expected.environment} must be protected by exactly ${expected.login}`);
+                  return;
+                }
+              }
+            } catch (error) {
+              core.setFailed(`approval preflight failed closed: ${error.status ?? 'provider error'}`);
+            }
+
+  first-approval:
+    name: first-review-triplexapps
+    needs: preflight
     runs-on: ubuntu-latest
     environment:
-      name: ${{ inputs.gate }}
+      name: ${{ inputs.gate }}-triplexapps
+    permissions:
+      contents: read
     steps:
-      - name: validate and record approval evidence
+      - name: first protected review completed
+        run: echo "First required protected review completed."
+
+  second-approval:
+    name: second-review-chex123
+    needs: first-approval
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.gate }}-chex123
+    permissions:
+      contents: read
+    steps:
+      - name: second protected review completed
+        run: echo "Second required protected review completed."
+
+  record-run-reference:
+    name: record-run-reference
+    needs: second-approval
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: record digest-bound run reference
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -42,21 +150,19 @@ jobs:
             const issue_number = Number(process.env.ISSUE_NUMBER);
             const gate = process.env.GATE;
             const digest = process.env.DECISION_DIGEST;
-            if (!Number.isInteger(issue_number) || issue_number < 1) { core.setFailed('invalid issue_number'); return; }
-            if (!/^sha256:[0-9a-f]{64}$/i.test(digest)) { core.setFailed('decision_digest must be sha256:<64 hex>'); return; }
-            const labels = { 'gate-1': 'stage:gate-1-approved', 'gate-2': 'stage:gate-2-approved', 'gate-3': 'stage:gate-3-approved', 'gate-4': 'stage:gate-4-approved' };
-            const label = labels[gate];
-            if (!label) { core.setFailed(`unsupported gate ${gate}`); return; }
-            await github.rest.issues.addLabels({ ...context.repo, issue_number, labels: [label] });
-            const evidence = [
-              '## Gate approval evidence',
+            if (!Number.isSafeInteger(issue_number) || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+              core.setFailed('approval inputs changed after preflight');
+              return;
+            }
+            const body = [
+              '## Gate review run reference',
               `- gate: \`${gate}\``,
-              `- decision: \`${digest}\``,
+              `- decision_digest: \`${digest}\``,
               `- workflow_run_id: \`${context.runId}\``,
               `- workflow_run_attempt: \`${process.env.GITHUB_RUN_ATTEMPT}\``,
-              `- initiated_by: \`${context.actor}\``,
-              `- provider: GitHub Actions protected environment`,
+              `- dispatched_by: \`${context.actor}\``,
+              '- expected review order: `triplexapps` then `chex123`',
               '',
-              'The GitHub environment review/audit for this workflow run is the authoritative approver evidence. The label is lifecycle state only.'
+              'Review this run’s GitHub Environment deployment records to verify approver identities. This comment is not approval evidence and does not authorize deployment or merge.'
             ].join('\n');
-            await github.rest.issues.createComment({ ...context.repo, issue_number, body: evidence });
+            await github.rest.issues.createComment({ ...context.repo, issue_number, body });
