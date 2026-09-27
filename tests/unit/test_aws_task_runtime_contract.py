@@ -1,12 +1,20 @@
 import re
 from pathlib import Path
 
+import pytest
+
 WORKSPACE_ROOT = Path(__file__).parents[3]
 AWS_TERRAFORM = WORKSPACE_ROOT / "nokinc-demo-infra" / "aws.tf"
 
 
+def _aws_terraform() -> str:
+    if not AWS_TERRAFORM.is_file():
+        pytest.skip("cross-repository infrastructure checkout is unavailable")
+    return AWS_TERRAFORM.read_text(encoding="utf-8")
+
+
 def test_ecs_task_injects_runtime_secrets_without_embedding_values() -> None:
-    content = AWS_TERRAFORM.read_text(encoding="utf-8")
+    content = _aws_terraform()
 
     assert 'variable "aws_auth_secret_arn"' in content
     assert 'variable "aws_database_worker_secret_arn"' in content
@@ -24,7 +32,7 @@ def test_ecs_task_injects_runtime_secrets_without_embedding_values() -> None:
 
 
 def test_aws_profile_provisions_private_managed_postgres() -> None:
-    content = AWS_TERRAFORM.read_text(encoding="utf-8")
+    content = _aws_terraform()
 
     assert 'resource "aws_db_subnet_group" "factory"' in content
     assert 'resource "aws_security_group" "database"' in content
@@ -37,7 +45,7 @@ def test_aws_profile_provisions_private_managed_postgres() -> None:
 
 
 def test_ecs_execution_role_can_inject_runtime_secrets() -> None:
-    content = AWS_TERRAFORM.read_text(encoding="utf-8")
+    content = _aws_terraform()
 
     assert 'data "aws_iam_policy_document" "execution_secrets"' in content
     assert 'resource "aws_iam_role_policy" "execution_secrets"' in content
@@ -46,7 +54,7 @@ def test_ecs_execution_role_can_inject_runtime_secrets() -> None:
 
 
 def test_service_can_egress_to_private_postgres() -> None:
-    content = AWS_TERRAFORM.read_text(encoding="utf-8")
+    content = _aws_terraform()
 
     assert 'resource "aws_security_group_rule" "service_database_egress"' in content
     assert "from_port                = 5432" in content
@@ -54,7 +62,7 @@ def test_service_can_egress_to_private_postgres() -> None:
 
 
 def test_oidc_profile_provisions_admin_managed_cognito_identity() -> None:
-    content = AWS_TERRAFORM.read_text(encoding="utf-8")
+    content = _aws_terraform()
 
     assert 'resource "aws_cognito_user_pool" "factory"' in content
     assert 'resource "aws_cognito_user_pool_client" "factory"' in content
@@ -73,7 +81,7 @@ def test_oidc_profile_provisions_admin_managed_cognito_identity() -> None:
 
 
 def test_cognito_client_configures_browser_authorization_code_callback() -> None:
-    content = AWS_TERRAFORM.read_text(encoding="utf-8")
+    content = _aws_terraform()
 
     assert 'resource "aws_cognito_user_pool_domain" "factory"' in content
     assert 'allowed_oauth_flows_user_pool_client = true' in content
