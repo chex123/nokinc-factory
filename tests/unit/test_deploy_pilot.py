@@ -332,11 +332,16 @@ def test_dev_extra_contains_full_runtime_and_analysis_test_dependencies() -> Non
     pyproject = Path(__file__).parents[2] / "pyproject.toml"
     config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     dev_dependencies = config["project"]["optional-dependencies"]["dev"]
+    phase_dependencies = (
+        set(config["project"]["optional-dependencies"]["phase1"])
+        | set(config["project"]["optional-dependencies"]["phase2"])
+    )
     names = {
         re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].casefold().replace("_", "-")
         for requirement in dev_dependencies
     }
 
+    assert phase_dependencies <= set(dev_dependencies)
     assert {
         "fastapi",
         "uvicorn",
