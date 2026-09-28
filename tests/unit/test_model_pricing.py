@@ -1,6 +1,7 @@
 from datetime import date
 
 from nokinc_factory.application.model_pricing import (
+    _RATES,
     estimate_model_cost,
     model_context_limits,
 )
@@ -61,6 +62,37 @@ def test_gpt6_luna_does_not_backdate_rates_before_first_verified_date() -> None:
         usage=ModelUsage(input_tokens=1_000, output_tokens=100),
         as_of=date(2026, 9, 27),
     ) is None
+
+
+def test_gpt6_luna_keeps_provider_effective_date_separate_from_knowledge_date() -> None:
+    rate = next(item for item in _RATES if item.model == "gpt-6-luna")
+
+    assert rate.known_from == date(2026, 9, 28)
+    assert rate.known_until is None
+    assert rate.provider_effective_from is None
+    assert rate.provider_effective_until is None
+
+
+def test_gemini_keeps_published_effective_window_separate_from_knowledge_dates() -> None:
+    rate = next(item for item in _RATES if item.price_card_id == "google-gemini-2026-09")
+
+    assert rate.known_from == date(2026, 9, 27)
+    assert rate.known_until is None
+    assert rate.provider_effective_from == date(2026, 9, 24)
+    assert rate.provider_effective_until == date(2027, 1, 1)
+
+
+def test_gemini_historical_estimate_uses_published_effective_window() -> None:
+    estimate = estimate_model_cost(
+        provider="google",
+        model="gemini-3.8-flash",
+        usage=ModelUsage(input_tokens=1_000, output_tokens=1_000),
+        as_of=date(2026, 9, 25),
+    )
+
+    assert estimate is not None
+    assert estimate.cost_nanodollars == 4_500_000
+    assert estimate.price_card_id == "google-gemini-2026-09"
 
 
 def test_astra_applies_published_long_context_multiplier() -> None:
