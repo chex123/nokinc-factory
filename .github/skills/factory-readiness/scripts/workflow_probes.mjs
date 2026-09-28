@@ -5,10 +5,13 @@
  * This is not proof of GitHub-hosted protection or a security sandbox.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
 
+const localRequire = createRequire(import.meta.url);
 const workflowUrl = new URL('../../../workflows/cross-model-review.yml', import.meta.url);
 const workflow = await readFile(workflowUrl, 'utf8');
 const marker = '          script: |';
@@ -117,7 +120,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
     },
   };
   const sandbox = {
-    github, context, Buffer, AbortSignal, URL,
+    github, context, Buffer, AbortSignal, URL, require: localRequire,
     core: { setFailed: message => { failures.push(message); } },
     process: { env: {
       OPENAI_API_KEY: 'synthetic-not-a-credential',
@@ -151,6 +154,15 @@ function assertBlocked(result, explanation) {
   assert.equal(result.statuses.some(status => status.state === 'success'), false, explanation);
   assert.equal(result.statuses.at(-1)?.state, 'failure', 'Must report a terminal blocking outcome');
   assert.ok(result.failures.length > 0, 'Must explain the blocking outcome');
+}
+
+function readDiffProvenance(input) {
+  const heading = '## VERIFIED DIFF PROVENANCE (GitHub API source and exact diff bytes)';
+  const start = input.indexOf(heading);
+  const end = input.indexOf('\n## PR DIFF', start);
+  assert.ok(start >= 0, 'Expected verified diff provenance in reviewer input');
+  assert.ok(end > start, 'Expected provenance to precede the supplied PR diff');
+  return JSON.parse(input.slice(start + heading.length, end).trim());
 }
 
 test('valid complete evidence still receives success on the tested head', async () => {
@@ -313,6 +325,43 @@ test('review fetches immutable base/head diff instead of floating PR content', a
   assert.equal(result.requests[0].route, 'GET /repos/{owner}/{repo}/compare/{base}...{head}');
   assert.equal(result.requests[0].options.base, 'c'.repeat(40));
   assert.equal(result.requests[0].options.head, result.testedSha);
+});
+
+test('reviewer input identifies the exact diff body and immutable source commits', async () => {
+  const diffData = 'diff --git a/model_pricing.py b/model_pricing.py\n' +
+    '--- a/model_pricing.py\n+++ b/model_pricing.py\n@@\n-rate\n+known date\n';
+  const result = await simulateReview({ diffData });
+  const expectedDigest = createHash('sha256').update(diffData, 'utf8').digest('hex');
+
+  assert.deepEqual(readDiffProvenance(result.modelInputs[0]), {
+    route: 'GET /repos/{owner}/{repo}/compare/{base}...{head}',
+    pull_number: 1,
+    media_type: 'application/vnd.github.v3.diff',
+    base_sha: 'c'.repeat(40),
+    head_sha: result.testedSha,
+    tested_sha: result.testedSha,
+    diff_bytes: Buffer.byteLength(diffData, 'utf8'),
+    diff_sha256: expectedDigest,
+  });
+});
+
+test('merged review provenance identifies the pinned pull diff and tested head', async () => {
+  const diffData = 'diff --git a/model_pricing.py b/model_pricing.py\n+known date\n';
+  const result = await simulateReview({ diffData, mergedPR: true, missingPRLinks: true });
+  const expectedDigest = createHash('sha256').update(diffData, 'utf8').digest('hex');
+
+  assert.deepEqual(readDiffProvenance(result.modelInputs[0]), {
+    route: 'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+    pull_number: 1,
+    media_type: 'application/vnd.github.v3.diff',
+    head_sha: result.testedSha,
+    tested_sha: result.testedSha,
+    diff_bytes: Buffer.byteLength(diffData, 'utf8'),
+    diff_sha256: expectedDigest,
+  });
+  const diffRequest = result.requests.find(request =>
+    request.route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}');
+  assert.equal(diffRequest?.options.pull_number, 1);
 });
 
 test('candidate cannot rewrite privileged gate or repository control files', async () => {
