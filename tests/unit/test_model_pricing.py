@@ -34,7 +34,7 @@ def test_gpt6_luna_uses_its_current_published_price() -> None:
             cache_write_input_tokens=1_000,
             output_tokens=500,
         ),
-        as_of=date(2026, 9, 27),
+        as_of=date(2026, 9, 28),
     )
 
     assert estimate is not None
@@ -47,11 +47,20 @@ def test_gpt6_luna_applies_published_long_context_multipliers() -> None:
         provider="openai",
         model="gpt-6-luna",
         usage=ModelUsage(input_tokens=272_001, output_tokens=1_000),
-        as_of=date(2026, 9, 27),
+        as_of=date(2026, 9, 28),
     )
 
     assert estimate is not None
     assert estimate.cost_nanodollars == 55_150_200
+
+
+def test_gpt6_luna_does_not_backdate_rates_before_first_verified_date() -> None:
+    assert estimate_model_cost(
+        provider="openai",
+        model="gpt-6-luna",
+        usage=ModelUsage(input_tokens=1_000, output_tokens=100),
+        as_of=date(2026, 9, 27),
+    ) is None
 
 
 def test_astra_applies_published_long_context_multiplier() -> None:

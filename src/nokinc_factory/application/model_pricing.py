@@ -2,7 +2,9 @@
 
 Costs are list-price equivalents calculated from provider-reported usage, not
 provider invoices. Update this rate card from the cited provider sources when
-prices or effective dates change. No spend threshold is enforced here.
+prices or published effective dates change. A known-from date is the provider's
+effective date only when the source publishes one; otherwise it is the first
+date this repository verified the rate. No spend threshold is enforced here.
 """
 
 from __future__ import annotations
@@ -42,8 +44,8 @@ class _TokenRates:
     cached_input_usd_per_million: Decimal | None
     cache_write_usd_per_million: Decimal | None
     output_usd_per_million: Decimal
-    effective_from: date
-    effective_until: date | None
+    known_from: date
+    known_until: date | None
     source_url: str
     region: str | None = None
     long_context_threshold: int | None = None
@@ -52,8 +54,8 @@ class _TokenRates:
 
     def applies(self, *, as_of: date, region: str) -> bool:
         return (
-            self.effective_from <= as_of
-            and (self.effective_until is None or as_of < self.effective_until)
+            self.known_from <= as_of
+            and (self.known_until is None or as_of < self.known_until)
             and (self.region is None or self.region == region)
         )
 
@@ -73,8 +75,8 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.01"),
         cache_write_usd_per_million=Decimal("0.125"),
         output_usd_per_million=Decimal("0.50"),
-        effective_from=date(2026, 9, 27),
-        effective_until=None,
+        known_from=date(2026, 9, 28),
+        known_until=None,
         source_url=_OPENAI_GPT6_LUNA_SOURCE,
         long_context_threshold=272_000,
         long_context_input_multiplier=Decimal("2"),
@@ -88,8 +90,8 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.02"),
         cache_write_usd_per_million=Decimal("0.25"),
         output_usd_per_million=Decimal("1.20"),
-        effective_from=date(2026, 9, 27),
-        effective_until=None,
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_OPENAI_LUNA_SOURCE,
         long_context_threshold=272_000,
         long_context_input_multiplier=Decimal("2"),
@@ -103,8 +105,8 @@ _RATES = (
         cached_input_usd_per_million=Decimal("1"),
         cache_write_usd_per_million=Decimal("12.5"),
         output_usd_per_million=Decimal("50"),
-        effective_from=date(2026, 9, 27),
-        effective_until=None,
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_OPENAI_ASTRA_SOURCE,
         long_context_threshold=272_000,
         long_context_input_multiplier=Decimal("2"),
@@ -118,8 +120,8 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.075"),
         cache_write_usd_per_million=None,
         output_usd_per_million=Decimal("3.75"),
-        effective_from=date(2026, 9, 24),
-        effective_until=date(2027, 1, 1),
+        known_from=date(2026, 9, 24),
+        known_until=date(2027, 1, 1),
         source_url=_GOOGLE_SOURCE,
     ),
     _TokenRates(
@@ -130,8 +132,8 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.15"),
         cache_write_usd_per_million=None,
         output_usd_per_million=Decimal("7.50"),
-        effective_from=date(2027, 1, 1),
-        effective_until=None,
+        known_from=date(2027, 1, 1),
+        known_until=None,
         source_url=_GOOGLE_SOURCE,
     ),
     _TokenRates(
@@ -142,8 +144,8 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.20"),
         cache_write_usd_per_million=Decimal("0"),
         output_usd_per_million=Decimal("3.20"),
-        effective_from=date(2026, 9, 1),
-        effective_until=None,
+        known_from=date(2026, 9, 1),
+        known_until=None,
         source_url=_AWS_SOURCE,
         region="us-east-1",
     ),
