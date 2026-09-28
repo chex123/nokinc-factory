@@ -144,8 +144,9 @@ test('unresolved context gaps must not be accepted as complete evidence', async 
 });
 
 test('context-gap failure reports bounded text with sensitive content redacted', async () => {
+  const fakeGitHubToken = ['ghp', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].join('_');
   const gap = 'Missing contract for reviewer@example.com +15551234567 ' +
-    'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 api_key=local-super-secret-value ' +
+    `${fakeGitHubToken} api_key=local-super-secret-value ` +
     'reviewer Mary Jones @chex123 **notify**';
   const result = await simulateReview({ gaps: [gap] });
 
