@@ -24,12 +24,17 @@ def test_pilot_records_selected_exact_model_routes() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     models = config["models"]
 
-    assert models["coding"]["doer"]["exact_model_id"] == "gpt-5.6-luna"
+    assert models["coding"]["doer"]["exact_model_id"] == "gpt-6-luna"
+    assert models["coding"]["doer"]["family"] == "openai-luna"
+    assert models["coding"]["doer"]["provider"] == "openai"
     assert models["coding"]["reviewer"]["exact_model_id"] == "gemini-3.8-flash"
+    assert models["coding"]["reviewer"]["family"] == "google-gemini-flash"
     assert (
         models["architecture_and_business"]["doer"]["exact_model_id"]
-        == "gpt-6-astra"
+        == "gpt-6-luna"
     )
+    assert models["architecture_and_business"]["doer"]["family"] == "openai-luna"
+    assert models["architecture_and_business"]["doer"]["provider"] == "openai"
     assert (
         models["architecture_and_business"]["reviewer"]["exact_model_id"]
         == "amazon.nova-pro-v1:0"
