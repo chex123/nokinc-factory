@@ -2,7 +2,10 @@
 
 Costs are list-price equivalents calculated from provider-reported usage, not
 provider invoices. Update this rate card from the cited provider sources when
-prices or effective dates change. No spend threshold is enforced here.
+prices or published effective dates change. Provider-effective bounds are kept
+separate from repository knowledge bounds; when a provider boundary is absent,
+the knowledge bound prevents inventing a backdated price. No spend threshold is
+enforced here.
 """
 
 from __future__ import annotations
@@ -42,18 +45,27 @@ class _TokenRates:
     cached_input_usd_per_million: Decimal | None
     cache_write_usd_per_million: Decimal | None
     output_usd_per_million: Decimal
-    effective_from: date
-    effective_until: date | None
+    known_from: date
+    known_until: date | None
     source_url: str
+    provider_effective_from: date | None
+    provider_effective_until: date | None
     region: str | None = None
     long_context_threshold: int | None = None
     long_context_input_multiplier: Decimal = Decimal("1")
     long_context_output_multiplier: Decimal = Decimal("1")
 
     def applies(self, *, as_of: date, region: str) -> bool:
+        """Prefer provider-effective bounds, falling back to repository knowledge dates."""
+        applicable_from = self.provider_effective_from
+        if applicable_from is None:
+            applicable_from = self.known_from
+        applicable_until = self.provider_effective_until
+        if applicable_until is None:
+            applicable_until = self.known_until
         return (
-            self.effective_from <= as_of
-            and (self.effective_until is None or as_of < self.effective_until)
+            applicable_from <= as_of
+            and (applicable_until is None or as_of < applicable_until)
             and (self.region is None or self.region == region)
         )
 
@@ -73,9 +85,11 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.01"),
         cache_write_usd_per_million=Decimal("0.125"),
         output_usd_per_million=Decimal("0.50"),
-        effective_from=date(2026, 9, 27),
-        effective_until=None,
+        known_from=date(2026, 9, 28),
+        known_until=None,
         source_url=_OPENAI_GPT6_LUNA_SOURCE,
+        provider_effective_from=None,
+        provider_effective_until=None,
         long_context_threshold=272_000,
         long_context_input_multiplier=Decimal("2"),
         long_context_output_multiplier=Decimal("1.5"),
@@ -88,9 +102,11 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.02"),
         cache_write_usd_per_million=Decimal("0.25"),
         output_usd_per_million=Decimal("1.20"),
-        effective_from=date(2026, 9, 27),
-        effective_until=None,
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_OPENAI_LUNA_SOURCE,
+        provider_effective_from=date(2026, 9, 27),
+        provider_effective_until=None,
         long_context_threshold=272_000,
         long_context_input_multiplier=Decimal("2"),
         long_context_output_multiplier=Decimal("1.5"),
@@ -103,9 +119,11 @@ _RATES = (
         cached_input_usd_per_million=Decimal("1"),
         cache_write_usd_per_million=Decimal("12.5"),
         output_usd_per_million=Decimal("50"),
-        effective_from=date(2026, 9, 27),
-        effective_until=None,
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_OPENAI_ASTRA_SOURCE,
+        provider_effective_from=date(2026, 9, 27),
+        provider_effective_until=None,
         long_context_threshold=272_000,
         long_context_input_multiplier=Decimal("2"),
         long_context_output_multiplier=Decimal("1.5"),
@@ -118,9 +136,11 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.075"),
         cache_write_usd_per_million=None,
         output_usd_per_million=Decimal("3.75"),
-        effective_from=date(2026, 9, 24),
-        effective_until=date(2027, 1, 1),
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_GOOGLE_SOURCE,
+        provider_effective_from=date(2026, 9, 24),
+        provider_effective_until=date(2027, 1, 1),
     ),
     _TokenRates(
         provider="google",
@@ -130,9 +150,11 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.15"),
         cache_write_usd_per_million=None,
         output_usd_per_million=Decimal("7.50"),
-        effective_from=date(2027, 1, 1),
-        effective_until=None,
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_GOOGLE_SOURCE,
+        provider_effective_from=date(2027, 1, 1),
+        provider_effective_until=None,
     ),
     _TokenRates(
         provider="aws-bedrock",
@@ -142,9 +164,11 @@ _RATES = (
         cached_input_usd_per_million=Decimal("0.20"),
         cache_write_usd_per_million=Decimal("0"),
         output_usd_per_million=Decimal("3.20"),
-        effective_from=date(2026, 9, 1),
-        effective_until=None,
+        known_from=date(2026, 9, 27),
+        known_until=None,
         source_url=_AWS_SOURCE,
+        provider_effective_from=date(2026, 9, 1),
+        provider_effective_until=None,
         region="us-east-1",
     ),
 )
