@@ -95,8 +95,8 @@ must not be reconciled with an un-targeted Terraform apply.
 
 ### Gate C — Exact model/provider identities
 
-Use provider-native exact API IDs, not internal labels: `gpt-5.6-luna`,
-`gpt-6-astra`, `gemini-3.8-flash`, and `amazon.nova-pro-v1:0`. The factory cannot
+Use provider-native exact API IDs, not internal labels: `gpt-6-luna`,
+`gemini-3.8-flash`, and `amazon.nova-pro-v1:0`. The factory cannot
 qualify aliases.
 
 For each model provide:
@@ -148,14 +148,14 @@ Before additional live chat calls or wider production use:
 - approve the exact model-family independence matrix;
 - approve permitted data locations and provider retention settings.
 
-Current selections recorded from the setup interview: synthetic/masked data only,
-OpenAI coding doer `gpt-5.6-luna`, OpenAI architecture/business doer
-`gpt-6-astra`, Google coding reviewer `gemini-3.8-flash`, and Bedrock
-architecture/business reviewer `amazon.nova-pro-v1:0`. One bounded synthetic
-connection probe passed for each, using four calls and the full `$20` estimated
-test budget. Actual billing was not measured; statistical quality/cost
-qualification remains pending. The previous Anthropic route was unavailable to
-this AWS account and is not qualified.
+Current selected routes: synthetic/masked data only; OpenAI GPT-6 Luna is the
+doer for coding, architecture, and business; Google Gemini 3.8 Flash reviews
+coding; Amazon Nova Pro reviews architecture and business. GPT-6 Luna must pass
+the bounded synthetic qualification probe before the routes are marked qualified.
+Qualification records actual provider token usage and dated list-price estimates;
+there is no dollar-spend call cutoff. Statistical quality/cost qualification
+remains pending. The previous Anthropic route was unavailable to this AWS
+account and is not qualified.
 
 ### Gate G — staging identity and environment isolation
 

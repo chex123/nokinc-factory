@@ -59,11 +59,27 @@ class _TokenRates:
 
 
 _OPENAI_LUNA_SOURCE = "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
+_OPENAI_GPT6_LUNA_SOURCE = "https://developers.openai.com/api/docs/models/gpt-6-luna"
 _OPENAI_ASTRA_SOURCE = "https://developers.openai.com/api/docs/models/gpt-6-astra"
 _GOOGLE_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
 _AWS_SOURCE = "https://aws.amazon.com/bedrock/pricing/"
 
 _RATES = (
+    _TokenRates(
+        provider="openai",
+        model="gpt-6-luna",
+        price_card_id="openai-gpt-6-luna-2026-09",
+        input_usd_per_million=Decimal("0.10"),
+        cached_input_usd_per_million=Decimal("0.01"),
+        cache_write_usd_per_million=Decimal("0.125"),
+        output_usd_per_million=Decimal("0.50"),
+        effective_from=date(2026, 9, 27),
+        effective_until=None,
+        source_url=_OPENAI_GPT6_LUNA_SOURCE,
+        long_context_threshold=272_000,
+        long_context_input_multiplier=Decimal("2"),
+        long_context_output_multiplier=Decimal("1.5"),
+    ),
     _TokenRates(
         provider="openai",
         model="gpt-5.6-luna",
@@ -134,6 +150,11 @@ _RATES = (
 )
 
 _CONTEXT_LIMITS = {
+    ("openai", "gpt-6-luna"): ModelContextLimits(
+        context_window_tokens=1_050_000,
+        max_input_tokens=922_000,
+        max_output_tokens=128_000,
+    ),
     ("openai", "gpt-5.6-luna"): ModelContextLimits(
         context_window_tokens=1_050_000,
         max_input_tokens=922_000,

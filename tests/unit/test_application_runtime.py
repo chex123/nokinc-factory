@@ -334,9 +334,8 @@ def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkey
         (provider, str(values["model"]), str(values["family"]))
         for provider, values in provider_calls
     } == {
-        ("openai", "gpt-6-astra", "openai-astra"),
+        ("openai", "gpt-6-luna", "openai-luna"),
         ("aws-bedrock", "amazon.nova-pro-v1:0", "amazon-nova-pro"),
-        ("openai", "gpt-5.6-luna", "openai-luna"),
         ("google", "gemini-3.8-flash", "google-gemini-flash"),
     }
     tokens_by_model = {
@@ -344,9 +343,8 @@ def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkey
         for _, values in provider_calls
     }
     assert tokens_by_model == {
-        "gpt-6-astra": 1536,
+        "gpt-6-luna": 1536,
         "amazon.nova-pro-v1:0": 512,
-        "gpt-5.6-luna": 1536,
         "gemini-3.8-flash": 512,
     }
 
@@ -366,13 +364,13 @@ def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkey
     )
 
     assert architecture_result.status == "ANSWERED"
-    assert architecture_result.model_runs[0].model == "gpt-6-astra"
+    assert architecture_result.model_runs[0].model == "gpt-6-luna"
     assert architecture_result.model_runs[1].model == "amazon.nova-pro-v1:0"
     assert coding_result.status == "ANSWERED"
-    assert coding_result.model_runs[0].model == "gpt-5.6-luna"
+    assert coding_result.model_runs[0].model == "gpt-6-luna"
     assert coding_result.model_runs[1].model == "gemini-3.8-flash"
     assert business_result.status == "ELICITING"
-    assert business_result.model_runs[0].model == "gpt-6-astra"
+    assert business_result.model_runs[0].model == "gpt-6-luna"
     assert business_result.model_runs[1].model == "amazon.nova-pro-v1:0"
 
 

@@ -24,6 +24,36 @@ def test_luna_list_price_uses_provider_reported_cached_and_uncached_tokens() -> 
     assert estimate.price_card_id == "openai-2026-09"
 
 
+def test_gpt6_luna_uses_its_current_published_price() -> None:
+    estimate = estimate_model_cost(
+        provider="openai",
+        model="gpt-6-luna",
+        usage=ModelUsage(
+            input_tokens=6_000,
+            cached_input_tokens=4_000,
+            cache_write_input_tokens=1_000,
+            output_tokens=500,
+        ),
+        as_of=date(2026, 9, 27),
+    )
+
+    assert estimate is not None
+    assert estimate.cost_nanodollars == 1_015_000
+    assert estimate.price_card_id == "openai-gpt-6-luna-2026-09"
+
+
+def test_gpt6_luna_applies_published_long_context_multipliers() -> None:
+    estimate = estimate_model_cost(
+        provider="openai",
+        model="gpt-6-luna",
+        usage=ModelUsage(input_tokens=272_001, output_tokens=1_000),
+        as_of=date(2026, 9, 27),
+    )
+
+    assert estimate is not None
+    assert estimate.cost_nanodollars == 55_150_200
+
+
 def test_astra_applies_published_long_context_multiplier() -> None:
     estimate = estimate_model_cost(
         provider="openai",
@@ -94,11 +124,15 @@ def test_nova_cost_is_unknown_outside_the_published_region() -> None:
 
 def test_model_context_limits_reflect_each_configured_provider_maximum() -> None:
     luna = model_context_limits(provider="openai", model="gpt-5.6-luna")
+    current_luna = model_context_limits(provider="openai", model="gpt-6-luna")
     gemini = model_context_limits(provider="google", model="gemini-3.8-flash")
     nova = model_context_limits(provider="aws-bedrock", model="amazon.nova-pro-v1:0")
 
     assert luna.max_input_tokens == 922_000
     assert luna.context_window_tokens == 1_050_000
+    assert current_luna is not None
+    assert current_luna.max_input_tokens == 922_000
+    assert current_luna.context_window_tokens == 1_050_000
     assert gemini.max_input_tokens == 1_048_576
     assert nova.max_input_tokens == 290_000
     assert nova.context_window_tokens == 300_000
