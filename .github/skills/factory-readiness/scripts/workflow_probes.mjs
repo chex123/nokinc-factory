@@ -42,6 +42,10 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
     unavailableRules = false, unavailableIssue = false, diffData = null,
     gateJobs = successfulGateJobs, unavailableGateJobs = false,
     missingPRLinks = false, associatedPRs = null, mergedPR = false,
+    mergedFiles = [{ filename: 'a.txt', status: 'modified' }],
+    currentTreeFiles = { 'a.txt': 'Synthetic current main source\n' },
+    unavailableCurrentTree = false, mutateCurrentBranchDuringReview = false,
+    mismatchedCurrentTreePath = false, mismatchedCurrentTreeBlob = false,
     linkedPullRequest = false, changedTaskField = null, changedSourceField = null,
     payloadOverride = undefined, issueBody = 'Synthetic data', prBody = null } = {}) {
   const statuses = [];
@@ -50,11 +54,15 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   const requests = [];
   const issueRequests = [];
   const gateRunRequests = [];
+  const pullFileRequests = [];
+  const branchRequests = [];
+  const currentSourceRequests = [];
   const modelInputs = [];
   let modelCalls = 0;
   const testedSha = 'a'.repeat(40);
   let currentSha = staleHead ? 'b'.repeat(40) : testedSha;
   let currentBase = 'c'.repeat(40);
+  let currentBaseBranchSha = 'f'.repeat(40);
   let currentBody = prBody ?? (missingTask ? '' : `${taskField}\n\nSynthetic change`);
   const context = {
     repo: { owner: 'audit', repo: 'synthetic' },
@@ -78,18 +86,49 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
           return { data: { jobs: gateJobs } };
         },
       },
-      pulls: { get: async () => ({ data: {
-        head: { sha: currentSha },
-        base: { sha: currentBase },
-        body: currentBody,
-        merged: mergedPR,
-      } }) },
+      pulls: {
+        get: async () => ({ data: {
+          head: { sha: currentSha },
+          base: { sha: currentBase, ref: 'main' },
+          body: currentBody,
+          merged: mergedPR,
+        } }),
+        listFiles: async args => {
+          pullFileRequests.push(args);
+          return { data: mergedFiles };
+        },
+      },
       repos: {
         createCommitStatus: async value => { statuses.push(value); },
-        getContent: async () => {
-          if (unavailableRules) throw new Error('synthetic unavailable rules');
+        getBranch: async args => {
+          branchRequests.push(args);
+          return { data: { name: args.branch, commit: { sha: currentBaseBranchSha } } };
+        },
+        getContent: async args => {
+          if (args.path === '.github/copilot-instructions.md') {
+            if (unavailableRules) throw new Error('synthetic unavailable rules');
+            return { data: {
+              content: Buffer.from('Synthetic invariant: no external actions').toString('base64'),
+              encoding: 'base64',
+            } };
+          }
+          currentSourceRequests.push(args);
+          if (unavailableCurrentTree) {
+            throw Object.assign(new Error('synthetic current source unavailable'), { status: 503 });
+          }
+          const source = currentTreeFiles[args.path];
+          if (typeof source !== 'string') {
+            throw Object.assign(new Error('synthetic current path absent'), { status: 404 });
+          }
           return { data: {
-            content: Buffer.from('Synthetic invariant: no external actions').toString('base64'),
+            type: 'file',
+            path: mismatchedCurrentTreePath ? 'different.txt' : args.path,
+            sha: mismatchedCurrentTreeBlob ? '1'.repeat(40) : createHash('sha1')
+              .update(`blob ${Buffer.byteLength(source, 'utf8')}\0`, 'utf8')
+              .update(Buffer.from(source, 'utf8'))
+              .digest('hex'),
+            size: Buffer.byteLength(source, 'utf8'),
+            content: Buffer.from(source, 'utf8').toString('base64'),
             encoding: 'base64',
           } };
         },
@@ -126,6 +165,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
       OPENAI_API_KEY: 'synthetic-not-a-credential',
       REVIEW_MODEL: 'configured-reviewer',
       MAX_DIFF_BYTES: '120000',
+      MAX_CURRENT_SOURCE_BYTES: '80000',
       GITHUB_SERVER_URL: 'https://github.com',
     } },
     fetch: async (_url, request) => {
@@ -134,6 +174,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
       if (mutateHeadDuringReview) currentSha = 'd'.repeat(40);
       if (changedSourceField === 'base') currentBase = 'e'.repeat(40);
       if (changedSourceField === 'body') currentBody = 'Other task #3';
+      if (mutateCurrentBranchDuringReview) currentBaseBranchSha = 'e'.repeat(40);
       return {
         ok: true,
         json: async () => payloadOverride !== undefined ? payloadOverride : ({
@@ -147,7 +188,8 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   };
   await vm.runInNewContext(`(async () => {\n${script}\n})()`, sandbox, { timeout: 1000 });
   return { statuses, failures, comments, modelCalls, testedSha, currentSha,
-    requests, issueRequests, gateRunRequests, modelInputs };
+    requests, issueRequests, gateRunRequests, pullFileRequests, branchRequests,
+    currentSourceRequests, modelInputs };
 }
 
 function assertBlocked(result, explanation) {
@@ -162,6 +204,15 @@ function readDiffProvenance(input) {
   const end = input.indexOf('\n## PR DIFF', start);
   assert.ok(start >= 0, 'Expected verified diff provenance in reviewer input');
   assert.ok(end > start, 'Expected provenance to precede the supplied PR diff');
+  return JSON.parse(input.slice(start + heading.length, end).trim());
+}
+
+function readCurrentTreeEvidence(input) {
+  const heading = '## VERIFIED CURRENT TREE EVIDENCE (read-only GitHub API at pinned branch commit)';
+  const start = input.indexOf(heading);
+  const end = input.indexOf('\n## VERIFIED DIFF PROVENANCE', start);
+  assert.ok(start >= 0, 'Expected verified current-tree evidence in reviewer input');
+  assert.ok(end > start, 'Expected current-tree evidence to precede the supplied PR diff');
   return JSON.parse(input.slice(start + heading.length, end).trim());
 }
 
@@ -325,6 +376,9 @@ test('review fetches immutable base/head diff instead of floating PR content', a
   assert.equal(result.requests[0].route, 'GET /repos/{owner}/{repo}/compare/{base}...{head}');
   assert.equal(result.requests[0].options.base, 'c'.repeat(40));
   assert.equal(result.requests[0].options.head, result.testedSha);
+  assert.equal(result.branchRequests.length, 0);
+  assert.equal(result.pullFileRequests.length, 0);
+  assert.doesNotMatch(result.modelInputs[0], /VERIFIED CURRENT TREE EVIDENCE/);
 });
 
 test('reviewer input identifies the exact diff body and immutable source commits', async () => {
@@ -362,6 +416,124 @@ test('merged review provenance identifies the pinned pull diff and tested head',
   const diffRequest = result.requests.find(request =>
     request.route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}');
   assert.equal(diffRequest?.options.pull_number, 1);
+});
+
+test('merged review includes commit-pinned current source snapshots with verified digests', async () => {
+  const sourcePath = 'src/nokinc_factory/application/model_pricing.py';
+  const source = [
+    'known_from=date(2026, 9, 28),',
+    'provider_effective_from=None,',
+    'provider_effective_until=None,',
+  ].join('\n');
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    mergedFiles: [{ filename: sourcePath, status: 'modified' }],
+    currentTreeFiles: { [sourcePath]: source },
+  });
+  const currentTree = readCurrentTreeEvidence(result.modelInputs[0]);
+
+  assert.deepEqual(currentTree, {
+    branch: 'main',
+    commit_sha: 'f'.repeat(40),
+    files: [{
+      path: sourcePath,
+      state: 'present',
+      blob_sha: createHash('sha1')
+        .update(`blob ${Buffer.byteLength(source, 'utf8')}\0`, 'utf8')
+        .update(Buffer.from(source, 'utf8'))
+        .digest('hex'),
+      byte_count: Buffer.byteLength(source, 'utf8'),
+      sha256: createHash('sha256').update(source, 'utf8').digest('hex'),
+      content: source,
+    }],
+  });
+  assert.equal(result.pullFileRequests[0].pull_number, 1);
+  assert.deepEqual(result.branchRequests.map(request => request.branch), ['main', 'main']);
+  assert.deepEqual(result.currentSourceRequests.map(request => ({ path: request.path, ref: request.ref })), [
+    { path: sourcePath, ref: 'f'.repeat(40) },
+  ]);
+});
+
+test('unavailable merged current-tree evidence blocks before model invocation', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    unavailableCurrentTree: true,
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Unavailable current-tree evidence must fail closed');
+});
+
+test('mismatched merged current-tree path blocks before model invocation', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    mismatchedCurrentTreePath: true,
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'A different current-tree file must not satisfy the requested path');
+});
+
+test('mismatched merged current-tree blob SHA blocks before model invocation', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    mismatchedCurrentTreeBlob: true,
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Current-tree blob identity must match the returned bytes');
+});
+
+test('merged current-tree evidence records paths absent at the pinned branch commit', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    mergedFiles: [{ filename: 'removed.txt', status: 'removed' }],
+    currentTreeFiles: {},
+  });
+
+  assert.deepEqual(readCurrentTreeEvidence(result.modelInputs[0]), {
+    branch: 'main',
+    commit_sha: 'f'.repeat(40),
+    files: [{ path: 'removed.txt', state: 'absent' }],
+  });
+});
+
+test('merged current-tree file-count limit fails closed before model invocation', async () => {
+  const mergedFiles = Array.from({ length: 100 }, (_, index) => ({
+    filename: `file-${index}.txt`,
+    status: 'modified',
+  }));
+  const result = await simulateReview({ mergedPR: true, missingPRLinks: true, mergedFiles });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Incomplete current-tree file list must fail closed');
+});
+
+test('merged current-tree byte limit fails closed without truncating source', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    currentTreeFiles: { 'a.txt': 'x'.repeat(80_001) },
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Oversized current-tree evidence must fail closed');
+});
+
+test('merged review blocks if the target branch moves during model review', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    mutateCurrentBranchDuringReview: true,
+  });
+
+  assert.equal(result.modelCalls, 1);
+  assertBlocked(result, 'A target branch change during current-tree review must block success');
 });
 
 test('candidate cannot rewrite privileged gate or repository control files', async () => {
