@@ -16,11 +16,29 @@ const block = workflow.slice(workflow.indexOf(marker) + marker.length).trimStart
 assert.ok(workflow.includes(marker), 'Expected the existing github-script block');
 const script = block.split('\n').map(line => line.replace(/^ {12}/, '')).join('\n');
 const taskField = 'Factory-Task: https://github.com/audit/synthetic/issues/2';
+const requiredDeterministicSteps = [
+  'build', 'types', 'lint', 'unit', 'acceptance', 'diff_coverage', 'secret_scan', 'dependency_scan',
+];
+const successfulGateJobs = [
+  {
+    name: 'deterministic-gates',
+    status: 'completed',
+    conclusion: 'success',
+    steps: requiredDeterministicSteps.map(name => ({
+      name,
+      status: 'completed',
+      conclusion: 'success',
+    })),
+  },
+  { name: 'baseline-assertion', status: 'completed', conclusion: 'success', steps: [] },
+  { name: 'frozen-contract', status: 'completed', conclusion: 'success', steps: [] },
+];
 
 async function simulateReview({ staleHead = false, missingTask = false, gaps = [],
     resolvedModel = 'configured-reviewer', mutateHeadDuringReview = false,
     unavailableRules = false, unavailableIssue = false, diffData = null,
-  missingPRLinks = false, associatedPRs = null, mergedPR = false,
+    gateJobs = successfulGateJobs, unavailableGateJobs = false,
+    missingPRLinks = false, associatedPRs = null, mergedPR = false,
     linkedPullRequest = false, changedTaskField = null, changedSourceField = null,
     payloadOverride = undefined, issueBody = 'Synthetic data', prBody = null } = {}) {
   const statuses = [];
@@ -28,6 +46,8 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   const comments = [];
   const requests = [];
   const issueRequests = [];
+  const gateRunRequests = [];
+  const modelInputs = [];
   let modelCalls = 0;
   const testedSha = 'a'.repeat(40);
   let currentSha = staleHead ? 'b'.repeat(40) : testedSha;
@@ -37,6 +57,9 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
     repo: { owner: 'audit', repo: 'synthetic' },
     runId: 1,
     payload: { workflow_run: {
+      id: 3,
+      run_attempt: 2,
+      name: 'gates',
       head_sha: testedSha,
       conclusion: 'success',
       event: 'pull_request',
@@ -45,6 +68,13 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   };
   const github = {
     rest: {
+      actions: {
+        listJobsForWorkflowRunAttempt: async args => {
+          gateRunRequests.push(args);
+          if (unavailableGateJobs) throw new Error('synthetic unavailable gate results');
+          return { data: { jobs: gateJobs } };
+        },
+      },
       pulls: { get: async () => ({ data: {
         head: { sha: currentSha },
         base: { sha: currentBase },
@@ -95,8 +125,9 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
       MAX_DIFF_BYTES: '120000',
       GITHUB_SERVER_URL: 'https://github.com',
     } },
-    fetch: async () => {
+    fetch: async (_url, request) => {
       modelCalls++;
+      modelInputs.push(JSON.parse(request.body).input);
       if (mutateHeadDuringReview) currentSha = 'd'.repeat(40);
       if (changedSourceField === 'base') currentBase = 'e'.repeat(40);
       if (changedSourceField === 'body') currentBody = 'Other task #3';
@@ -113,7 +144,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   };
   await vm.runInNewContext(`(async () => {\n${script}\n})()`, sandbox, { timeout: 1000 });
   return { statuses, failures, comments, modelCalls, testedSha, currentSha,
-    requests, issueRequests };
+    requests, issueRequests, gateRunRequests, modelInputs };
 }
 
 function assertBlocked(result, explanation) {
@@ -128,6 +159,55 @@ test('valid complete evidence still receives success on the tested head', async 
   assert.equal(result.statuses.at(-1)?.sha, result.testedSha);
   assert.deepEqual(result.failures, []);
   assert.equal(result.modelCalls, 1);
+  assert.equal(result.gateRunRequests.length, 1);
+  assert.equal(result.gateRunRequests[0].run_id, 3);
+  assert.equal(result.gateRunRequests[0].attempt_number, 2);
+  assert.match(result.modelInputs[0], /VERIFIED CI EVIDENCE/);
+  assert.match(result.modelInputs[0], /"tested_sha": "a{40}"/);
+  assert.match(result.modelInputs[0], /TASK CONTEXT/);
+  assert.match(result.modelInputs[0], /Synthetic data/);
+  assert.match(result.modelInputs[0], /PR DESCRIPTION/);
+  assert.match(result.modelInputs[0], /Synthetic change/);
+  for (const stepName of requiredDeterministicSteps) {
+    assert.ok(result.modelInputs[0].includes(`"${stepName}": "success"`),
+      `Expected verified success for ${stepName} in the model input`);
+  }
+});
+
+test('failed required CI job or step blocks before a model call', async () => {
+  const gateJobs = structuredClone(successfulGateJobs);
+  gateJobs[0].steps.find(step => step.name === 'unit').conclusion = 'failure';
+
+  const result = await simulateReview({ gateJobs });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'A failed required CI step must not reach the reviewer model');
+});
+
+test('missing required CI job or step blocks before a model call', async () => {
+  const gateJobs = structuredClone(successfulGateJobs);
+  gateJobs[0].steps = gateJobs[0].steps.filter(step => step.name !== 'secret_scan');
+
+  const result = await simulateReview({ gateJobs });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'An incomplete CI evidence set must not reach the reviewer model');
+});
+
+test('missing required CI job blocks before a model call', async () => {
+  const gateJobs = successfulGateJobs.filter(job => job.name !== 'baseline-assertion');
+
+  const result = await simulateReview({ gateJobs });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'A missing required CI job must not reach the reviewer model');
+});
+
+test('unavailable CI run evidence blocks before a model call', async () => {
+  const result = await simulateReview({ unavailableGateJobs: true });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Unavailable gate evidence must not be assumed successful');
 });
 
 test('merged gate rerun resolves its PR from the tested commit when links are absent', async () => {
