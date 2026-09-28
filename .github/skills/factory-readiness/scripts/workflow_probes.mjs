@@ -143,6 +143,38 @@ test('unresolved context gaps must not be accepted as complete evidence', async 
     'ACCEPT plus an unresolved required-context gap received success');
 });
 
+test('context-gap failure reports bounded text with sensitive content redacted', async () => {
+  const gap = 'Missing contract for reviewer@example.com +15551234567 ' +
+    'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 api_key=local-super-secret-value ' +
+    'reviewer Mary Jones @chex123 **notify**';
+  const result = await simulateReview({ gaps: [gap] });
+
+  assertBlocked(result, 'A context gap must remain a blocking outcome');
+  assert.equal(result.comments.length, 1);
+  const body = result.comments[0].body;
+  assert.match(body, /Missing contract/);
+  assert.match(body, /REDACTED EMAIL/);
+  assert.match(body, /REDACTED PHONE/);
+  assert.match(body, /REDACTED SECRET/);
+  assert.match(body, /REDACTED NAME/);
+  assert.doesNotMatch(body,
+    /reviewer@example\.com|\+15551234567|ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ|local-super-secret-value|Mary Jones/);
+  assert.doesNotMatch(body, /@chex123|\*\*notify\*\*/);
+});
+
+test('context-gap report caps the number and length of details', async () => {
+  const gaps = Array.from({ length: 10 }, (_, index) =>
+    `gap-${index}: ${'x'.repeat(800)}`);
+  const result = await simulateReview({ gaps });
+
+  assertBlocked(result, 'Excessive context gaps must remain blocking');
+  const body = result.comments[0].body;
+  assert.match(body, /Showing first 5 of 10/);
+  assert.match(body, /gap-0/);
+  assert.doesNotMatch(body, /gap-5:/);
+  assert.ok(body.length <= 4_000, 'Diagnostic comment must be bounded');
+});
+
 test('unqualified resolved model identity must block acceptance', async () => {
   const result = await simulateReview({ resolvedModel: 'unexpected-model-family' });
   assertBlocked(result,
