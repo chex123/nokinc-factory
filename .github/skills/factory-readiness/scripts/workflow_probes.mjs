@@ -20,6 +20,7 @@ const taskField = 'Factory-Task: https://github.com/audit/synthetic/issues/2';
 async function simulateReview({ staleHead = false, missingTask = false, gaps = [],
     resolvedModel = 'configured-reviewer', mutateHeadDuringReview = false,
     unavailableRules = false, unavailableIssue = false, diffData = null,
+  missingPRLinks = false, associatedPRs = null, mergedPR = false,
     linkedPullRequest = false, changedTaskField = null, changedSourceField = null,
     payloadOverride = undefined, issueBody = 'Synthetic data', prBody = null } = {}) {
   const statuses = [];
@@ -39,7 +40,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
       head_sha: testedSha,
       conclusion: 'success',
       event: 'pull_request',
-      pull_requests: [{ number: 1, head: { sha: testedSha } }],
+      pull_requests: missingPRLinks ? [] : [{ number: 1, head: { sha: testedSha } }],
     } },
   };
   const github = {
@@ -48,6 +49,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
         head: { sha: currentSha },
         base: { sha: currentBase },
         body: currentBody,
+        merged: mergedPR,
       } }) },
       repos: {
         createCommitStatus: async value => { statuses.push(value); },
@@ -78,6 +80,9 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
     },
     request: async (route, options) => {
       requests.push({ route, options });
+      if (route === 'GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls') {
+        return { data: associatedPRs ?? [{ number: 1, head: { sha: testedSha } }] };
+      }
       return { data: diffData ?? 'diff --git a/a.txt b/a.txt\n+synthetic change\n' };
     },
   };
@@ -123,6 +128,47 @@ test('valid complete evidence still receives success on the tested head', async 
   assert.equal(result.statuses.at(-1)?.sha, result.testedSha);
   assert.deepEqual(result.failures, []);
   assert.equal(result.modelCalls, 1);
+});
+
+test('merged gate rerun resolves its PR from the tested commit when links are absent', async () => {
+  const result = await simulateReview({ missingPRLinks: true, mergedPR: true });
+
+  assert.equal(result.statuses.at(-1)?.state, 'success');
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.modelCalls, 1);
+  assert.equal(
+    result.requests[0].route,
+    'GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls',
+  );
+  assert.equal(result.requests[0].options.commit_sha, result.testedSha);
+  assert.equal(
+    result.requests[1].route,
+    'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+  );
+  assert.equal(result.requests[1].options.pull_number, 1);
+});
+
+test('commit association fallback ignores PRs with a different tested head', async () => {
+  const result = await simulateReview({
+    missingPRLinks: true,
+    associatedPRs: [{ number: 2, head: { sha: 'b'.repeat(40) } }],
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assert.ok(result.failures.includes('Exactly one valid triggering PR is required'));
+});
+
+test('ambiguous commit-to-PR fallback fails closed before a model call', async () => {
+  const result = await simulateReview({
+    missingPRLinks: true,
+    associatedPRs: [
+      { number: 1, head: { sha: 'a'.repeat(40) } },
+      { number: 2, head: { sha: 'a'.repeat(40) } },
+    ],
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assert.ok(result.failures.includes('Exactly one valid triggering PR is required'));
 });
 
 test('review must not approve a head different from the successful gate run', async () => {
