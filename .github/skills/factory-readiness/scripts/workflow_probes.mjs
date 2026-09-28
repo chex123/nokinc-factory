@@ -36,7 +36,37 @@ const successfulGateJobs = [
   { name: 'baseline-assertion', status: 'completed', conclusion: 'success', steps: [] },
   { name: 'frozen-contract', status: 'completed', conclusion: 'success', steps: [] },
 ];
-
+const requiredCurrentTreeSteps = [
+  'build', 'types', 'lint', 'unit', 'acceptance', 'secret_scan', 'dependency_scan',
+];
+const successfulCurrentTreeJobs = [
+  {
+    name: 'deterministic-gates',
+    status: 'completed',
+    conclusion: 'success',
+    steps: [
+      ...requiredCurrentTreeSteps.map(name => ({
+        name,
+        status: 'completed',
+        conclusion: 'success',
+      })),
+      { name: 'diff_coverage', status: 'completed', conclusion: 'skipped' },
+    ],
+  },
+  { name: 'baseline-assertion', status: 'completed', conclusion: 'skipped', steps: [] },
+  { name: 'frozen-contract', status: 'completed', conclusion: 'skipped', steps: [] },
+];
+const successfulCurrentTreeRun = {
+  id: 4,
+  run_attempt: 1,
+  run_number: 4,
+  name: 'gates',
+  event: 'push',
+  head_sha: 'f'.repeat(40),
+  status: 'completed',
+  conclusion: 'success',
+  created_at: '2026-09-28T22:34:49Z',
+};
 async function simulateReview({ staleHead = false, missingTask = false, gaps = [],
     resolvedModel = 'configured-reviewer', mutateHeadDuringReview = false,
     unavailableRules = false, unavailableIssue = false, diffData = null,
@@ -46,6 +76,9 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
     currentTreeFiles = { 'a.txt': 'Synthetic current main source\n' },
     unavailableCurrentTree = false, mutateCurrentBranchDuringReview = false,
     mismatchedCurrentTreePath = false, mismatchedCurrentTreeBlob = false,
+    currentTreeRuns = [successfulCurrentTreeRun],
+    currentTreeJobs = successfulCurrentTreeJobs,
+    unavailableCurrentTreeRuns = false, unavailableCurrentTreeJobs = false,
     linkedPullRequest = false, changedTaskField = null, changedSourceField = null,
     payloadOverride = undefined, issueBody = 'Synthetic data', prBody = null } = {}) {
   const statuses = [];
@@ -57,6 +90,8 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   const pullFileRequests = [];
   const branchRequests = [];
   const currentSourceRequests = [];
+  const currentTreeRunRequests = [];
+  const currentTreeJobRequests = [];
   const modelInputs = [];
   let modelCalls = 0;
   const testedSha = 'a'.repeat(40);
@@ -82,8 +117,22 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
       actions: {
         listJobsForWorkflowRunAttempt: async args => {
           gateRunRequests.push(args);
+          if (args.run_id === 4) {
+            currentTreeJobRequests.push(args);
+            if (unavailableCurrentTreeJobs) {
+              throw new Error('synthetic unavailable current-tree job evidence');
+            }
+            return { data: { jobs: currentTreeJobs } };
+          }
           if (unavailableGateJobs) throw new Error('synthetic unavailable gate results');
           return { data: { jobs: gateJobs } };
+        },
+        listWorkflowRuns: async args => {
+          currentTreeRunRequests.push(args);
+          if (unavailableCurrentTreeRuns) {
+            throw new Error('synthetic unavailable current-tree workflow runs');
+          }
+          return { data: { workflow_runs: currentTreeRuns } };
         },
       },
       pulls: {
@@ -189,7 +238,7 @@ async function simulateReview({ staleHead = false, missingTask = false, gaps = [
   await vm.runInNewContext(`(async () => {\n${script}\n})()`, sandbox, { timeout: 1000 });
   return { statuses, failures, comments, modelCalls, testedSha, currentSha,
     requests, issueRequests, gateRunRequests, pullFileRequests, branchRequests,
-    currentSourceRequests, modelInputs };
+    currentSourceRequests, currentTreeRunRequests, currentTreeJobRequests, modelInputs };
 }
 
 function assertBlocked(result, explanation) {
@@ -208,7 +257,7 @@ function readDiffProvenance(input) {
 }
 
 function readCurrentTreeEvidence(input) {
-  const heading = '## VERIFIED CURRENT TREE EVIDENCE (read-only GitHub API at pinned branch commit)';
+  const heading = '## VERIFIED CURRENT TREE AND CI EVIDENCE (read-only GitHub API at pinned branch commit)';
   const start = input.indexOf(heading);
   const end = input.indexOf('\n## VERIFIED DIFF PROVENANCE', start);
   assert.ok(start >= 0, 'Expected verified current-tree evidence in reviewer input');
@@ -436,6 +485,23 @@ test('merged review includes commit-pinned current source snapshots with verifie
   assert.deepEqual(currentTree, {
     branch: 'main',
     commit_sha: 'f'.repeat(40),
+    ci: {
+      workflow: 'gates',
+      run_id: 4,
+      run_attempt: 1,
+      event: 'push',
+      head_sha: 'f'.repeat(40),
+      conclusion: 'success',
+      jobs: {
+        'deterministic-gates': 'success',
+        'baseline-assertion': 'skipped',
+        'frozen-contract': 'skipped',
+        steps: {
+          ...Object.fromEntries(requiredCurrentTreeSteps.map(name => [name, 'success'])),
+          diff_coverage: 'skipped',
+        },
+      },
+    },
     files: [{
       path: sourcePath,
       state: 'present',
@@ -453,6 +519,10 @@ test('merged review includes commit-pinned current source snapshots with verifie
   assert.deepEqual(result.currentSourceRequests.map(request => ({ path: request.path, ref: request.ref })), [
     { path: sourcePath, ref: 'f'.repeat(40) },
   ]);
+  assert.equal(result.currentTreeRunRequests[0].head_sha, 'f'.repeat(40));
+  assert.equal(result.currentTreeRunRequests[0].workflow_id, 'gates.yml');
+  assert.equal(result.currentTreeJobRequests[0].run_id, 4);
+  assert.equal(result.currentTreeJobRequests[0].attempt_number, 1);
 });
 
 test('unavailable merged current-tree evidence blocks before model invocation', async () => {
@@ -464,6 +534,72 @@ test('unavailable merged current-tree evidence blocks before model invocation', 
 
   assert.equal(result.modelCalls, 0);
   assertBlocked(result, 'Unavailable current-tree evidence must fail closed');
+});
+
+test('merged review blocks if no successful gates run matches the pinned current-tree SHA', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    currentTreeRuns: [{ ...successfulCurrentTreeRun, head_sha: 'e'.repeat(40) }],
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Unverified current-tree CI must block model invocation');
+});
+
+test('merged review blocks if current-tree CI runs are unavailable', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    unavailableCurrentTreeRuns: true,
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Unavailable current-tree CI runs must fail closed');
+});
+
+test('merged review blocks if current-tree CI job evidence is unavailable', async () => {
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    unavailableCurrentTreeJobs: true,
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Unavailable current-tree jobs must fail closed');
+});
+
+test('merged review blocks if current-tree deterministic steps are incomplete', async () => {
+  const currentTreeJobs = structuredClone(successfulCurrentTreeJobs);
+  currentTreeJobs[0].steps.find(step => step.name === 'unit').conclusion = 'failure';
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    currentTreeJobs,
+  });
+
+  assert.equal(result.modelCalls, 0);
+  assertBlocked(result, 'Failed current-tree CI steps must block model invocation');
+});
+
+test('merged current-tree pull-request CI requires successful diff coverage', async () => {
+  const currentTreeJobs = structuredClone(successfulCurrentTreeJobs);
+  currentTreeJobs.find(job => job.name === 'baseline-assertion').conclusion = 'success';
+  currentTreeJobs.find(job => job.name === 'frozen-contract').conclusion = 'success';
+  const currentDeterministic = currentTreeJobs.find(job => job.name === 'deterministic-gates');
+  currentDeterministic.steps.find(step => step.name === 'diff_coverage').conclusion = 'success';
+  const result = await simulateReview({
+    mergedPR: true,
+    missingPRLinks: true,
+    currentTreeRuns: [{ ...successfulCurrentTreeRun, event: 'pull_request' }],
+    currentTreeJobs,
+  });
+  const currentTree = readCurrentTreeEvidence(result.modelInputs[0]);
+
+  assert.equal(currentTree.ci.event, 'pull_request');
+  assert.equal(currentTree.ci.jobs['baseline-assertion'], 'success');
+  assert.equal(currentTree.ci.jobs['frozen-contract'], 'success');
+  assert.equal(currentTree.ci.jobs.steps.diff_coverage, 'success');
 });
 
 test('mismatched merged current-tree path blocks before model invocation', async () => {
@@ -499,6 +635,23 @@ test('merged current-tree evidence records paths absent at the pinned branch com
   assert.deepEqual(readCurrentTreeEvidence(result.modelInputs[0]), {
     branch: 'main',
     commit_sha: 'f'.repeat(40),
+    ci: {
+      workflow: 'gates',
+      run_id: 4,
+      run_attempt: 1,
+      event: 'push',
+      head_sha: 'f'.repeat(40),
+      conclusion: 'success',
+      jobs: {
+        'deterministic-gates': 'success',
+        'baseline-assertion': 'skipped',
+        'frozen-contract': 'skipped',
+        steps: {
+          ...Object.fromEntries(requiredCurrentTreeSteps.map(name => [name, 'success'])),
+          diff_coverage: 'skipped',
+        },
+      },
+    },
     files: [{ path: 'removed.txt', state: 'absent' }],
   });
 });
