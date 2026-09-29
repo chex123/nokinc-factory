@@ -344,6 +344,7 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
     workflow = repository_root / ".github" / "workflows" / "deploy-pilot.yml"
     content = workflow.read_text(encoding="utf-8")
     skill = repository_root / ".github" / "skills" / "factory-image-deployment" / "SKILL.md"
+    setup = repository_root / "docs" / "AWS-MODEL-SETUP-GATES.md"
     instructions = repository_root / ".github" / "copilot-instructions.md"
 
     assert "workflow_dispatch:" in content
@@ -366,6 +367,11 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
         in skill_text
     )
     assert "does not change T2 branch-protection approval rules" in skill_text
+    setup_text = setup.read_text(encoding="utf-8")
+    assert (
+        "The protected `pilot-deploy` environment requires only `chex123`; "
+        "`triplexapps` initiates the run."
+    ) in setup_text
     assert "factory-image-deployment/SKILL.md" in instructions.read_text(encoding="utf-8")
 
 

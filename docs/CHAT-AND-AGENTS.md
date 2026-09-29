@@ -110,15 +110,13 @@ API still has no dispatcher, ALM issue binding, workflow-run verifier, or
 Environment-review verifier. Approval remains fail-closed with
 `APPROVAL_PROVIDER_NOT_CONFIGURED`.
 
-A separate `pilot-deploy` GitHub Environment currently requires `triplexapps`,
-with self-review prevention, protected-branch-only deployment, and disabled
-administrator bypass. The requested change is to require only `chex123`, with
-`triplexapps` initiating the workflow. GitHub rejected the environment update
-with HTTP 403 because the active identity lacks repository-admin rights; the
-live reviewer remains `triplexapps` until an admin applies it. The OIDC
-workflow, IAM role, and role-ARN repository variable are on `main`; no image
-deployment has run yet. The active IAM user still has administrator-group
-permissions and can bypass this workflow through direct AWS APIs.
+A separate `pilot-deploy` GitHub Environment now requires `chex123` as its sole
+reviewer, with `triplexapps` initiating the workflow. Self-review prevention,
+protected-branch-only deployment, and disabled administrator bypass remain in
+force. The OIDC workflow, IAM role, and role-ARN repository variable are on
+`main`; no image deployment has run yet. The active IAM user still has
+administrator-group permissions and can bypass this workflow through direct
+AWS APIs.
 
 No isolated runtime worker or complete SDLC orchestrator is connected. Explicit
 runtime/e2e/simulation requests still fail with
