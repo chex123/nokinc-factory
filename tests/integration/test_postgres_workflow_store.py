@@ -237,6 +237,54 @@ def test_model_turn_budget_reservation_is_durable_and_tenant_scoped(database) ->
     assert persisted[-1].chat_turn_reservation == reservation
 
 
+def test_unlimited_model_turn_reservations_are_durable(database) -> None:
+    _, worker = database
+    store = PostgresWorkflowStore(worker)
+    tenant = "tenant-" + uuid4().hex
+    item = store.create_intake(
+        tenant_id=tenant,
+        actor_id="user-a",
+        now=NOW,
+        message="synthetic question",
+    )
+    reservation = ChatTurnReservation(
+        agent_role="business_analyst",
+        analysis_profile="business",
+        repository=None,
+        input_digest=content_digest("synthetic question"),
+        history_digest=content_digest([]),
+    )
+
+    first = store.reserve_chat_turn(
+        tenant_id=tenant,
+        work_item_id=item.work_item_id,
+        actor_id="user-a",
+        reservation=reservation,
+        limit=None,
+        now=NOW,
+    )
+    second = store.reserve_chat_turn(
+        tenant_id=tenant,
+        work_item_id=item.work_item_id,
+        actor_id="user-a",
+        reservation=reservation,
+        limit=None,
+        now=NOW,
+    )
+
+    persisted = PostgresWorkflowStore(worker).trace(
+        tenant_id=tenant,
+        work_item_id=item.work_item_id,
+    )
+    assert first.kind == second.kind == "CHAT_TURN_RESERVED"
+    assert [event.kind for event in persisted] == [
+        "INTAKE",
+        "CHAT_TURN_RESERVED",
+        "CHAT_TURN_RESERVED",
+    ]
+    assert [event.chat_turn_reservation for event in persisted[1:]] == [reservation, reservation]
+
+
 def test_non_postgres_dialect_is_rejected_without_execution() -> None:
     engine = create_engine("sqlite://")
     try:

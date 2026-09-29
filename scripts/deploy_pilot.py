@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 
 class DeploymentError(RuntimeError):
@@ -35,6 +35,9 @@ class CommandRunner(Protocol):
     ) -> str: ...
 
 
+ChatModelTurnLimit = int | Literal["unlimited"]
+
+
 @dataclass(frozen=True)
 class DeploymentConfig:
     region: str
@@ -46,7 +49,7 @@ class DeploymentConfig:
     container_cli: str = "podman"
     container_name: str = "factory"
     account_id: str = "441186133046"
-    chat_model_turn_limit: int | None = None
+    chat_model_turn_limit: ChatModelTurnLimit | None = None
     scan_poll_attempts: int = 90
     scan_poll_seconds: int = 10
 
@@ -77,9 +80,6 @@ _KNOWN_SEVERITIES = {
     "INFORMATIONAL",
     "UNDEFINED",
 }
-_MAX_PILOT_CHAT_MODEL_TURN_LIMIT = 7
-
-
 def validate_registry_configuration(repository: Mapping[str, object]) -> None:
     if repository.get("imageTagMutability") != "IMMUTABLE":
         raise DeploymentError("ECR repository must enforce immutable tags")
@@ -128,7 +128,7 @@ def task_definition_for_image(
     *,
     container_name: str,
     image: str,
-    chat_model_turn_limit: int | None = None,
+    chat_model_turn_limit: ChatModelTurnLimit | None = None,
 ) -> dict[str, object]:
     if "@" not in image or not _DIGEST_PATTERN.fullmatch(image.rsplit("@", 1)[-1]):
         raise DeploymentError("task definition image must be pinned by sha256 digest")
@@ -384,13 +384,27 @@ def _require_rollback(service: Mapping[str, object]) -> None:
         raise DeploymentError("ECS circuit-breaker rollback must be enabled before deployment")
 
 
-def _validate_chat_turn_limit(limit: int | None) -> None:
-    if limit is None:
+def _validate_chat_turn_limit(limit: ChatModelTurnLimit | None) -> None:
+    if limit is None or limit == "unlimited":
         return
-    if isinstance(limit, bool) or limit < 1:
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise DeploymentError("chat model turn limit must be a positive integer")
-    if limit > _MAX_PILOT_CHAT_MODEL_TURN_LIMIT:
-        raise DeploymentError("maximum cumulative turn limit is 7")
+
+
+def _parse_chat_turn_limit(value: str) -> ChatModelTurnLimit:
+    if value == "unlimited":
+        return "unlimited"
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "chat model turn limit must be a positive integer or 'unlimited'"
+        ) from None
+    if limit < 1:
+        raise argparse.ArgumentTypeError(
+            "chat model turn limit must be a positive integer or 'unlimited'"
+        )
+    return limit
 
 
 def _single_service(response: Mapping[str, object]) -> dict[str, object]:
@@ -462,7 +476,7 @@ def _arguments() -> DeploymentConfig:
     parser.add_argument("--engine", default="podman", dest="container_cli")
     parser.add_argument("--container", default="factory", dest="container_name")
     parser.add_argument("--account-id", default="441186133046")
-    parser.add_argument("--chat-model-turn-limit", type=int, default=None)
+    parser.add_argument("--chat-model-turn-limit", type=_parse_chat_turn_limit, default=None)
     parser.add_argument("--scan-poll-attempts", type=int, default=90)
     parser.add_argument("--scan-poll-seconds", type=int, default=10)
     parsed = parser.parse_args()

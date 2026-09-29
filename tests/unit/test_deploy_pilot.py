@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -8,6 +9,7 @@ import pytest
 from scripts.deploy_pilot import (
     DeploymentConfig,
     DeploymentError,
+    _arguments,
     deploy_pilot,
     task_definition_for_image,
     validate_registry_configuration,
@@ -105,13 +107,48 @@ def test_task_definition_replaces_only_the_target_container_image() -> None:
     assert preserved["containerDefinitions"][0]["environment"] == [
         {"name": "FACTORY_CHAT_MODEL_TURN_LIMIT", "value": "2"},
     ]
-    with pytest.raises(DeploymentError, match="maximum cumulative turn limit is 7"):
-        task_definition_for_image(
-            task_definition,
-            container_name="factory",
-            image="repo@sha256:" + "f" * 64,
-            chat_model_turn_limit=8,
-        )
+    uncapped = task_definition_for_image(
+        task_definition,
+        container_name="factory",
+        image="repo@sha256:" + "f" * 64,
+        chat_model_turn_limit=1000,
+    )
+    assert uncapped["containerDefinitions"][0]["environment"] == [
+        {"name": "FACTORY_CHAT_MODEL_TURN_LIMIT", "value": "1000"},
+    ]
+
+
+def test_task_definition_sets_unlimited_chat_turn_limit() -> None:
+    task_definition = {
+        "containerDefinitions": [{
+            "name": "factory",
+            "image": "repo@sha256:" + "b" * 64,
+            "environment": [{"name": "FACTORY_CHAT_MODEL_TURN_LIMIT", "value": "2"}],
+        }],
+    }
+
+    result = task_definition_for_image(
+        task_definition,
+        container_name="factory",
+        image="repo@sha256:" + "d" * 64,
+        chat_model_turn_limit="unlimited",
+    )
+
+    assert result["containerDefinitions"][0]["environment"] == [
+        {"name": "FACTORY_CHAT_MODEL_TURN_LIMIT", "value": "unlimited"},
+    ]
+
+
+def test_deploy_cli_accepts_unlimited_chat_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["deploy_pilot.py", "--tag", "pilot-test", "--chat-model-turn-limit", "unlimited"],
+    )
+
+    config = _arguments()
+
+    assert config.chat_model_turn_limit == "unlimited"
 
 
 class FakeRunner:
@@ -320,7 +357,8 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
     assert "python -m pytest" in content
     skill_text = skill.read_text(encoding="utf-8")
     assert "completed ECR scan" in skill_text
-    assert "cumulative ceiling" in skill_text
+    assert "`unlimited` removes the application" in skill_text
+    assert "no hard dollar ceiling" in skill_text
     assert "never refunded" in skill_text
     assert "factory-image-deployment/SKILL.md" in instructions.read_text(encoding="utf-8")
 

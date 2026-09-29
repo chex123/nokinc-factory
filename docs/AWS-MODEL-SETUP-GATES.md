@@ -41,9 +41,11 @@
 	was consumed. A separate estimated `$20` allowance covered two live chat
 	turns; both were durably reserved and returned 502 without a recorded result.
 	On 27 September the user authorized five additional turns (ten provider
-	calls). This is a turn limit, not a hard dollar ceiling. The live task still
-	has limit 2; cumulative limit 7 has not been deployed, and no additional
-	model call has been made. Actual billing and model quality remain unverified.
+	calls). On 29 September this was superseded by explicit authorization for
+	uncapped production testing. The target is
+	`FACTORY_CHAT_MODEL_TURN_LIMIT=unlimited`; the live task still has limit 2
+	until the reviewed change is deployed through the protected workflow. There
+	is no hard dollar ceiling. Actual billing and model quality remain unverified.
 - Local runtime assembly now loads the exact architecture and coding model pairs
 	from `pilot.yaml`, enforces distinct doer/reviewer families, caps output at
 	1,536/512 tokens, and routes repository discussions through one doer plus one
@@ -143,8 +145,9 @@ No API key or private key belongs in this repository, chat, ECS environment vari
 Before additional live chat calls or wider production use:
 
 - name a second human reviewer for production-sensitive actions;
-- deploy the authorized five-turn extension through the protected workflow;
-	it sets cumulative limit 7 and must not refund either failed reservation;
+- deploy `FACTORY_CHAT_MODEL_TURN_LIMIT=unlimited` through the protected
+	workflow for the explicitly authorized uncapped test. This has no hard dollar
+	ceiling; preserve durable reservation and audit behavior.
 - approve the exact model-family independence matrix;
 - approve permitted data locations and provider retention settings.
 
@@ -237,8 +240,9 @@ Authenticated trace reads show both authorized turns (Business Analyst and
 frontend Code Analyst) have `INTAKE` and `CHAT_TURN_RESERVED`, but no
 `CHAT_TURN_RECORDED`; both returned 502 without assistant output. CloudWatch
 contains generic Uvicorn 502 access lines only. The two-turn allowance is
-still enforced by the live task. The user has authorized five additional turns,
-but cumulative limit 7 has not yet been applied. Actual billing is unverified.
+still enforced by the live task. On 29 September the user authorized uncapped
+testing; the `unlimited` runtime setting is not deployed yet. Actual billing is
+unverified, and the application has no hard dollar ceiling.
 
 CloudWatch filters for both old failures returned only access lines and no
 `ERROR` records. Local unpublished code now logs only failure stage, exception
@@ -304,10 +308,11 @@ verification, and Environment-review verification are still required.
 
 The first estimated `$20` synthetic allowance was consumed by four connection
 probes. A separate estimated `$20` allowance covered two live turns; both were
-reserved, returned 502, and produced no `CHAT_TURN_RECORDED` event. The user
-then authorized five additional turns. The live revision-18 cap remains 2 until
-the local changes are published and deployed with cumulative limit 7. There is
-no hard dollar ceiling in the application. The
+reserved, returned 502, and produced no `CHAT_TURN_RECORDED` event. On 29
+September the user superseded the five-turn extension and authorized uncapped
+testing. The target is `FACTORY_CHAT_MODEL_TURN_LIMIT=unlimited`; the live
+revision-18 cap remains 2 until the reviewed change is deployed. There is no
+hard dollar ceiling in the application. The
 remaining production blockers include provider diagnosis/model qualification,
 an isolated runtime worker, durable full-SDLC orchestration, provider-backed
 approvals, production policy/SLO/recovery decisions, and shared Terraform
@@ -316,7 +321,7 @@ state. The full SDLC is not connected.
 ## Execution after gates
 
 1. Preserve the current Cognito session controls; the authenticated browser currently returns metadata for all three repositories.
-2. Publish the local safe-diagnostic and scan-gated deployment changes; use the `pilot-deploy` workflow with a unique tag and cumulative turn limit `7`, then inspect the safe diagnostic code before consuming more of the authorized allowance.
+2. Publish the local safe-diagnostic and scan-gated deployment changes; use the `pilot-deploy` workflow with a unique tag and `model_turn_limit=unlimited`, then inspect the safe diagnostic code before further provider testing.
 3. Install a dedicated least-privilege GitHub App on the personal approval repository, or move the workflow to an App-covered organization repository; provide a genuinely distinct human reviewer.
 4. Implement canonical issue binding, Actions dispatch, run/status checks, and Environment-review verification before any `/gate` request can authorize work.
 5. Build and qualify an isolated runtime worker, then connect it to durable SDLC orchestration; runtime asks remain fail-closed until complete.

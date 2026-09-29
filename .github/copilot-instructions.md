@@ -49,6 +49,27 @@ for a solved problem. See spec Part 15.
 - **Never** write code that reads secrets from the environment and logs, prints or
   returns them. Anything reachable by a model-controlled shell is compromised.
 
+## Repository and worktree boundary
+
+- This workspace can contain multiple independent Git repositories. Resolve the
+  selected repository with `git rev-parse --show-toplevel`; never run repository
+  work from the workspace wrapper or edit a sibling repository by accident.
+- Keep all task work and generated artifacts inside the selected repository. Put
+  linked worktrees under `<repo-root>/.worktrees/<task>`; never create them as
+  siblings under the wrapper, parent directory, or another external location.
+  `.worktrees/` is ignored by the repository.
+- Before changing branches, record the repository root, branch, HEAD, dirty paths,
+  and existing worktrees. Preserve pre-existing changes. Do not reset, clean,
+  stash, or switch a dirty user checkout; create an isolated in-repository feature
+  worktree from the approved base instead.
+- Follow the normal SDLC: add a focused regression first and observe it fail,
+  make the smallest implementation change, then run focused and required full
+  tests, typing, lint, coverage, and security checks before independent review.
+  Do not commit, push, merge, or deploy without explicit user authorization.
+- Keep task-owned test output and scratch files under the selected repository;
+  never use the workspace wrapper or an external worktree as a project scratch
+  directory.
+
 ## Definition of Done for any issue here
 
 - Acceptance scenarios in `tests/acceptance/` pass (they were merged first)

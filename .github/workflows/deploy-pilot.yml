@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       model_turn_limit:
-        description: Optional cumulative tenant turn limit; leave blank to preserve
+        description: Optional cumulative tenant turn limit (positive integer or unlimited); blank preserves
         required: false
         type: string
 

@@ -4,6 +4,16 @@
 commercial-ready release. This ledger supplements, rather than rewrites, the
 [historical audit](READINESS-2026-09-12.md) and [delivery plan](DELIVERY-PLAN.md).
 
+## 29 September authorization update
+
+- The user explicitly superseded the previous five-turn extension and requested
+  uncapped production testing. The target is
+  `FACTORY_CHAT_MODEL_TURN_LIMIT=unlimited`; this removes the application-level
+  tenant turn ceiling and does not create a provider-spend ceiling.
+- The live ECS task remains at revision 18 with limit 2 until the source change
+  is reviewed, merged, and deployed through the protected `pilot-deploy` path.
+  No provider call or production deployment is implied by this ledger update.
+
 ## 27 September continuation
 
 - AWS CLI was reauthenticated as IAM user `chexudeze` (account
