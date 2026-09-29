@@ -372,6 +372,11 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
         "The protected `pilot-deploy` environment requires only `chex123`; "
         "`triplexapps` initiates the run."
     ) in setup_text
+    immutable_subject = (
+        "repo:chex123@74789946/nokinc-factory@1346414547:environment:pilot-deploy"
+    )
+    assert immutable_subject in skill_text
+    assert immutable_subject in setup_text
     assert "factory-image-deployment/SKILL.md" in instructions.read_text(encoding="utf-8")
 
 

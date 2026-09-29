@@ -257,14 +257,21 @@ Chainguard Wolfi runtime has no Perl executable and uses zlib `1.3.2.1-motley`.
 For the next deployment, current `main` includes a main-only GitHub workflow,
 an immutable-tag/ECR-scan gate, digest-pinned task-definition promotion, and a
 repository skill requiring this path. The AWS GitHub OIDC provider and
-`pilot-factory-github-deploy` role are configured; trust is restricted to
-`repo:chex123/nokinc-factory:environment:pilot-deploy`, and IAM simulation
-confirmed the role is denied other ECR repos, ECS services, and IAM roles. The
-`AWS_PILOT_DEPLOY_ROLE_ARN` repository variable is set. PR #28 merged the
-unlimited turn setting as `e408b318`; post-merge gates run `36614842047`
-passed. The environment now requires `chex123` as sole reviewer; `triplexapps`
-initiates. No image deployment has run yet. The IAM user remains in the
-Administrators group and can bypass the workflow with direct AWS calls.
+`pilot-factory-github-deploy` role and `AWS_PILOT_DEPLOY_ROLE_ARN` variable are
+configured. Deployment run `36618131008` passed quality but failed to assume
+the role with `Not authorized to perform sts:AssumeRoleWithWebIdentity`; image
+build, scan, and ECS promotion were skipped, so no AWS resources were changed.
+Console inspection confirmed the trust used the obsolete name-only subject.
+It has now been updated to the immutable subject
+`repo:chex123@74789946/nokinc-factory@1346414547:environment:pilot-deploy`,
+while retaining `aud=sts.amazonaws.com`, the existing provider principal, and
+`sts:AssumeRoleWithWebIdentity`. IAM simulation previously confirmed role
+permissions are scoped to the target ECR repo, Factory service/task family, and
+existing task/execution roles. PR #28 merged the unlimited turn setting as
+`e408b318`; post-merge gates run `36614842047` passed. The environment requires
+`chex123` as sole reviewer; `triplexapps` initiates. Retry the protected deploy
+to verify OIDC exchange and rollout. The IAM user remains in the Administrators
+group and can bypass the workflow with direct AWS calls.
 
 The protected `pilot-deploy` environment requires only `chex123`, with
 `triplexapps` as initiator, self-review prevented, protected branches only, and

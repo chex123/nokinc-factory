@@ -66,9 +66,12 @@ is implemented by `scripts/deploy_pilot.py` and invoked by
 
 - Create repository variable `AWS_PILOT_DEPLOY_ROLE_ARN` for a role in account
   `441186133046`, region `us-east-1`.
-- Configure the IAM OIDC trust subject as
-  `repo:chex123/nokinc-factory:environment:pilot-deploy` and audience
-  `sts.amazonaws.com`.
+- Configure the IAM OIDC provider as `token.actions.githubusercontent.com` with
+   audience `sts.amazonaws.com`. This repository was created after GitHub's
+   immutable-subject rollout; the role trust `sub` must be
+   `repo:chex123@74789946/nokinc-factory@1346414547:environment:pilot-deploy`.
+   Verify the live role trust matches this exact subject; the former name-only
+   subject does not match tokens from this repository.
 - Configure the `pilot-deploy` environment with an independent required
   reviewer, self-review prevention, and protected-branch deployment policy.
 - Remove direct ECS promotion permissions from personal/operator identities
