@@ -360,6 +360,12 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
     assert "`unlimited` removes the application" in skill_text
     assert "no hard dollar ceiling" in skill_text
     assert "never refunded" in skill_text
+    assert (
+        "`triplexapps` dispatches the workflow and `chex123` is the sole required "
+        "`pilot-deploy` reviewer"
+        in skill_text
+    )
+    assert "does not change T2 branch-protection approval rules" in skill_text
     assert "factory-image-deployment/SKILL.md" in instructions.read_text(encoding="utf-8")
 
 

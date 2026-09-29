@@ -145,6 +145,11 @@ No API key or private key belongs in this repository, chat, ECS environment vari
 Before additional live chat calls or wider production use:
 
 - name a second human reviewer for production-sensitive actions;
+- the requested pilot image deployment policy is `triplexapps` as initiator
+	and `chex123` as the sole required `pilot-deploy` reviewer. This is one
+	reviewer in addition to the initiator, not two additional reviewers; it does
+	not change T2 branch-protection approval rules or the separate gate-approval
+	workflow. This environment change is pending repository-admin rights.
 - deploy `FACTORY_CHAT_MODEL_TURN_LIMIT=unlimited` through the protected
 	workflow for the explicitly authorized uncapped test. This has no hard dollar
 	ceiling; preserve durable reservation and audit behavior.
@@ -219,10 +224,12 @@ Until an App credential covers the approval repository and canonical issue
 binding, dispatch, run/status verification, and Environment-review verification
 exist, approval requests remain fail-closed and do not authorize work.
 
-The separate `pilot-deploy` environment is configured for `triplexapps`,
+The separate `pilot-deploy` environment currently requires `triplexapps`,
 prevents self-review, is protected-branch-only, and has administrator bypass
-disabled. It protects only the new image-deployment workflow; it does not
-connect `/gate` to GitHub or supply the missing approval App installation.
+disabled. The requested switch to sole reviewer `chex123` is pending; an
+environment update attempt was rejected because the active identity lacks
+repository-admin rights. It protects only image deployment and does not connect
+`/gate` to GitHub or supply the missing approval App installation.
 
 ## Current deployment boundary
 
@@ -252,20 +259,25 @@ bodies, prompts, or credentials.
 ECR Basic scan completed for revision 18's image with zero findings. Its
 Chainguard Wolfi runtime has no Perl executable and uses zlib `1.3.2.1-motley`.
 
-For the next deployment, local source now includes a main-only GitHub workflow,
+For the next deployment, current `main` includes a main-only GitHub workflow,
 an immutable-tag/ECR-scan gate, digest-pinned task-definition promotion, and a
 repository skill requiring this path. The AWS GitHub OIDC provider and
 `pilot-factory-github-deploy` role are configured; trust is restricted to
 `repo:chex123/nokinc-factory:environment:pilot-deploy`, and IAM simulation
 confirmed the role is denied other ECR repos, ECS services, and IAM roles. The
-`AWS_PILOT_DEPLOY_ROLE_ARN` repository variable is set. The workflow source is
-still local/unpushed, so this deployment path has not run. The IAM user remains
-in the Administrators group and can bypass the workflow with direct AWS calls.
+`AWS_PILOT_DEPLOY_ROLE_ARN` repository variable is set. PR #28 merged the
+unlimited turn setting as `e408b318`; post-merge gates run `36614842047`
+passed. No image deployment has run yet. The live environment reviewer remains
+`triplexapps` until a repository admin applies the requested change to
+`chex123`; the API returned HTTP 403 for the current identity. The IAM user
+remains in the Administrators group and can bypass the workflow with direct
+AWS calls.
 
-The protected `pilot-deploy` environment requires `triplexapps`, prevents
-self-review, allows protected branches only, and has administrator bypass
-disabled. Account-level configuration does not prove the reviewer is a
-different human from the requester.
+The protected `pilot-deploy` environment currently requires `triplexapps`,
+prevents self-review, allows protected branches only, and has administrator
+bypass disabled. The requested configuration is one reviewer, `chex123`, in
+addition to the `triplexapps` initiator, not a three-person approval chain.
+Account-level configuration does not by itself prove distinct human ownership.
 
 The broker's AWS secret reference handoff was corrected. The live
 `GET /v1/github/repositories` endpoint returns exact metadata for

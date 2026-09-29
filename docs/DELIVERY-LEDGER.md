@@ -13,6 +13,13 @@ commercial-ready release. This ledger supplements, rather than rewrites, the
 - The live ECS task remains at revision 18 with limit 2 until the source change
   is reviewed, merged, and deployed through the protected `pilot-deploy` path.
   No provider call or production deployment is implied by this ledger update.
+- PR #28 merged unlimited mode at `e408b318`; post-merge gates run `36614842047`
+  passed. The live `pilot-deploy` environment still requires `triplexapps`, with
+  self-review prevention, protected-branch-only deployment, and administrator
+  bypass disabled. The requested change is one required reviewer, `chex123`,
+  in addition to the `triplexapps` initiator; GitHub rejected the update with
+  HTTP 403 because the active identity lacks repository-admin rights. The live
+  task remains at limit 2 until the protected deployment completes.
 
 ## 27 September continuation
 
@@ -48,7 +55,7 @@ commercial-ready release. This ledger supplements, rather than rewrites, the
   repo, Factory service/task family, and existing task/execution roles; an
   unrelated ECR repo, ECS service, and Admin role are denied. The role ARN is
   stored as repository variable `AWS_PILOT_DEPLOY_ROLE_ARN`.
-- Configured GitHub environment `pilot-deploy` with reviewer `triplexapps`,
+- Initially configured GitHub environment `pilot-deploy` with reviewer `triplexapps`,
   self-review prevention, protected-branch policy, and administrator bypass
   disabled. This verifies account-level protection only; distinct human
   ownership of `triplexapps` is not verified. The IAM user remains in the
