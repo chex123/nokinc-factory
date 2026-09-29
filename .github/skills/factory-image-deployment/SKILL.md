@@ -34,6 +34,8 @@ is implemented by `scripts/deploy_pilot.py` and invoked by
 3. The `pilot-deploy` environment must require an independent reviewer, prevent
    self-review, and allow only the protected default branch. A missing or
    unprotected environment is a hard stop.
+   For `chex123/nokinc-factory`, `triplexapps` dispatches the workflow and `chex123` is the sole required `pilot-deploy` reviewer. This is one reviewer
+   in addition to the initiator, not two additional reviewers. This setting does not change T2 branch-protection approval rules or the separate `gate-approval` workflow.
 4. Use GitHub OIDC and the `AWS_PILOT_DEPLOY_ROLE_ARN` repository variable. The
    role trust must be limited to this repository's `pilot-deploy` environment.
    The role must be least-privilege; `iam:PassRole` is limited to the existing

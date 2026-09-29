@@ -89,17 +89,17 @@ frontend Code Analyst request. Authenticated trace reads confirm that each has
 returned 502 without an assistant response. CloudWatch contains generic
 Uvicorn 502 access lines only, with no provider exception detail. The live
 two-turn cap is exhausted, so the current task rejects further model calls.
-Five additional turns were authorized on 27 September but have not been applied
-to the live task. Actual provider billing is unverified.
+PR #28 merged explicit `unlimited` support into `main`, and post-merge gates
+passed. The live ECS task remains at revision 18 with limit 2 until the
+protected image deployment completes. No additional provider call has been
+made; actual billing is unverified and `unlimited` has no hard dollar ceiling.
 
 On 27 September, CloudWatch filters around both failures returned only those
-access lines and no `ERROR` records. Local unpublished code now records a
-redacted failure stage, exception class, and allowlisted provider diagnostic
-code; it does not record exception messages, provider bodies, prompts, or
-credentials. The user authorized five additional turns. The local deployment
-workflow can set the cumulative limit to seven, but the live revision remains
-at two until the workflow changes are published and deployed. No additional
-model call has been made; turn-count limits do not enforce a dollar ceiling.
+access lines and no `ERROR` records. Mainline code now records a redacted
+failure stage, exception class, and allowlisted provider diagnostic code; it
+does not record exception messages, provider bodies, prompts, or credentials.
+These diagnostics are not in the live image yet. Turn-count limits do not
+enforce a dollar ceiling.
 
 The `gate-approval.yml` workflow is active in `chex123/nokinc-factory`. All
 eight `gate-1..4` / `triplexapps` and `chex123` GitHub Environments have exactly
@@ -110,13 +110,13 @@ API still has no dispatcher, ALM issue binding, workflow-run verifier, or
 Environment-review verifier. Approval remains fail-closed with
 `APPROVAL_PROVIDER_NOT_CONFIGURED`.
 
-A separate `pilot-deploy` GitHub Environment was configured for the future
-image-deployment workflow with `triplexapps` as required reviewer,
-self-review prevention, protected-branch-only deployment, and administrator
-bypass disabled. The local OIDC deployment workflow, IAM role, and role-ARN
-repository variable are not yet on the default branch; no deployment run has
-used them. The active IAM user still has administrator-group permissions and
-can bypass this workflow through direct AWS APIs.
+A separate `pilot-deploy` GitHub Environment now requires `chex123` as its sole
+reviewer, with `triplexapps` initiating the workflow. Self-review prevention,
+protected-branch-only deployment, and disabled administrator bypass remain in
+force. The OIDC workflow, IAM role, and role-ARN repository variable are on
+`main`; no image deployment has run yet. The active IAM user still has
+administrator-group permissions and can bypass this workflow through direct
+AWS APIs.
 
 No isolated runtime worker or complete SDLC orchestrator is connected. Explicit
 runtime/e2e/simulation requests still fail with
