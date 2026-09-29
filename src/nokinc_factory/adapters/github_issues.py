@@ -138,7 +138,10 @@ class GitHubIssuesAdapter(WorkItemPort):
             GitHubIssue,
             CreateStoryPayload(
                 title=f"[STORY] {story.work_item_id}",
-                body=story.model_dump_json(indent=2),
+                body=(
+                    f"{story.model_dump_json(indent=2)}\n\n"
+                    f"<!-- factory-work-item-id: {story.work_item_id} -->"
+                ),
                 labels=["story", state_label(WorkItemState.BUSINESS_READY)],
             ),
         )

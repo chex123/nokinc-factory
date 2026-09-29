@@ -137,6 +137,17 @@ def test_create_story_requires_business_ready_evidence_and_maps_work_item_ref() 
     )
 
 
+def test_create_story_embeds_exact_factory_work_item_marker() -> None:
+    transport = FakeTransport(_issue("story", "stage:business-ready", number=71))
+    adapter = GitHubIssuesAdapter("acme", "factory", "token", transport=transport)
+
+    adapter.create_story(_story())
+
+    payload = transport.calls[0][3]
+    assert isinstance(payload, CreateStoryPayload)
+    assert "<!-- factory-work-item-id: story-1 -->" in payload.body
+
+
 def test_create_story_rejects_response_without_business_ready_evidence() -> None:
     adapter = GitHubIssuesAdapter(
         "acme", "factory", "token", transport=FakeTransport(_issue("story"))
