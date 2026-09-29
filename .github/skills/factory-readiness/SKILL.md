@@ -40,6 +40,15 @@ argument-hint: 'audit | execute Pass A | execute Pass B'
 - TDD: reproduce first, implement minimally, preserve frozen tests, verify
   focused/full tests/types/lint/coverage/scans and independent review. Never
   weaken evidence or repair the same failure speculatively more than twice.
+- For code intended to run in the Factory app/image, local production-like E2E
+   against all configured real repositories is a gate before PR creation, branch
+   push, or deploy dispatch. Follow
+   [local pilot validation](../../../docs/LOCAL-PILOT-VALIDATION.md). Verify the
+   user-visible result and durable reservation/recorded trace. If AWS, GitHub
+   App, PostgreSQL, or provider access prevents the test, mark the relevant item
+   `BLOCKED`, name the missing prerequisite, and stop; mocks do not waive it.
+   Docs-only changes still run their focused tests and lint but do not require
+   real-provider calls.
 - Normal SDLC still applies to readiness work: test first, review the diff, and
    keep artifacts, commits, and PRs bound to the selected repository. Commit,
    push, merge, or deploy only when explicitly authorized.
