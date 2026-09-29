@@ -114,7 +114,14 @@ A separate `pilot-deploy` GitHub Environment now requires `chex123` as its sole
 reviewer, with `triplexapps` initiating the workflow. Self-review prevention,
 protected-branch-only deployment, and disabled administrator bypass remain in
 force. The OIDC workflow, IAM role, and role-ARN repository variable are on
-`main`; no image deployment has run yet. The active IAM user still has
+`main`. Deployment run `36618131008` passed quality but failed to assume the
+AWS role before image build, scan, or ECS update; no AWS resource change
+occurred. The repository was created after GitHub's immutable-subject rollout;
+the expected role-trust subject is
+`repo:chex123@74789946/nokinc-factory@1346414547:environment:pilot-deploy`.
+The live IAM trust was inspected and corrected to this subject, retaining the
+same GitHub OIDC provider and `sts.amazonaws.com` audience. Retry the protected
+workflow to verify role assumption and rollout. The active IAM user still has
 administrator-group permissions and can bypass this workflow through direct
 AWS APIs.
 

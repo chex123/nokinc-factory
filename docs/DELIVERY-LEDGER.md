@@ -19,6 +19,14 @@ commercial-ready release. This ledger supplements, rather than rewrites, the
   deployment, and administrator bypass disabled. This is one required reviewer
   in addition to the initiator, not two extra reviewers. The live task remains
   at limit 2 until the protected deployment completes.
+- Protected run `36618131008` passed quality but failed role assumption with
+  `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Image build, scan,
+  and ECS promotion were skipped; no AWS resource change occurred. The live
+  role trust was found using the old name-only subject and updated to this
+  repository's immutable subject:
+  `repo:chex123@74789946/nokinc-factory@1346414547:environment:pilot-deploy`.
+  The provider, `sts.amazonaws.com` audience, and role permissions remain
+  unchanged. A protected retry is needed to verify role assumption.
 
 ## 27 September continuation
 
