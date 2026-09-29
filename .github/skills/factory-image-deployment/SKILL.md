@@ -23,6 +23,13 @@ is implemented by `scripts/deploy_pilot.py` and invoked by
    deployment quality sequence, and review before requesting promotion. Commit
    and push only with explicit user authorization; never merge or deploy around
    required review or environment approvals.
+- Before creating the PR or dispatching this workflow for a Factory runtime or
+   application change, run the local real-repository E2E gate in
+   `docs/LOCAL-PILOT-VALIDATION.md`. Confirm a recorded result and durable trace;
+   mocks and this workflow's own quality job do not replace that check. Missing
+   local integration prerequisites are a blocking status, not a waiver. A
+   documentation-only change does not need provider calls, but still needs its
+   focused tests and lint.
 
 ## Required Controls
 

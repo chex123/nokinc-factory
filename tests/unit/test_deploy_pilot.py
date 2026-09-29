@@ -380,6 +380,29 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
     assert "factory-image-deployment/SKILL.md" in instructions.read_text(encoding="utf-8")
 
 
+def test_pilot_changes_require_local_real_repository_e2e_before_pr_or_promotion() -> None:
+    repository_root = Path(__file__).parents[2]
+    validation = repository_root / "docs" / "LOCAL-PILOT-VALIDATION.md"
+    assert validation.is_file(), "Pilot E2E pre-promotion runbook is required"
+    content = validation.read_text(encoding="utf-8")
+
+    normalized_content = " ".join(content.split())
+    assert (
+        "Before creating a PR, pushing a branch, or dispatching `deploy-pilot`"
+        in normalized_content
+    )
+    assert "NOK-Apps/flur-sdk" in content
+    assert "NOK-Apps/flur-frontend" in content
+    assert "NOK-Apps/flur-backend" in content
+    assert "CHAT_TURN_RESERVED" in content
+    assert "CHAT_TURN_RECORDED" in content
+    assert "BLOCKED" in content
+    assert "qualify_models.py" in content
+    assert "no checked-in local real-repository chat E2E runner" in content
+    assert "FACTORY_TEST_DATABASE_URL" in content
+    assert "no AWS CLI or AWS environment credentials" in content
+
+
 def test_dev_extra_contains_full_runtime_and_analysis_test_dependencies() -> None:
     import re
     import tomllib

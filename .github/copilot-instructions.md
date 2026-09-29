@@ -69,6 +69,15 @@ for a solved problem. See spec Part 15.
 - Keep task-owned test output and scratch files under the selected repository;
   never use the workspace wrapper or an external worktree as a project scratch
   directory.
+- Before creating a PR, pushing a branch, or dispatching a production image,
+  run `docs/LOCAL-PILOT-VALIDATION.md` locally for runtime/application changes.
+  The real read-only smoke must cover every configured repository and verify an
+  assistant result plus durable reservation/recorded trace. Mock tests and
+  deployment CI alone are not E2E evidence. If any local integration prerequisite
+  is unavailable, report `BLOCKED` and do not call the change ready; never skip
+  the check silently or substitute a remote production run for local validation.
+  Docs-only changes may proceed without provider calls after their focused tests
+  and lint pass; they do not count as runtime E2E evidence.
 
 ## Definition of Done for any issue here
 
