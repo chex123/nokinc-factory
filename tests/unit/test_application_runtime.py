@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import boto3
+import pytest
 from fastapi.testclient import TestClient
 
 import nokinc_factory.application.runtime as runtime
@@ -228,9 +229,17 @@ def test_cognito_production_runtime_exposes_hosted_login_redirect(monkeypatch) -
     assert "factory.nokinc.com%2Fauth%2Fcallback" in response.headers["location"]
 
 
-def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("turn_limit_text", "expected_turn_limit"),
+    [("2", 2), ("unlimited", None)],
+)
+def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(
+    monkeypatch,
+    turn_limit_text: str,
+    expected_turn_limit: int | None,
+) -> None:
     monkeypatch.setenv("FACTORY_ENV", "development")
-    monkeypatch.setenv("FACTORY_CHAT_MODEL_TURN_LIMIT", "2")
+    monkeypatch.setenv("FACTORY_CHAT_MODEL_TURN_LIMIT", turn_limit_text)
     monkeypatch.setenv("FACTORY_CHAT_MODEL_TENANT_ID", "00001")
     monkeypatch.setenv("FACTORY_PILOT_CONFIG", str(PILOT_CONFIG))
     monkeypatch.setenv("FACTORY_GITHUB_APP_ID", "5020848")
@@ -329,7 +338,7 @@ def test_runtime_loads_exact_pilot_github_app_scope_without_network_calls(monkey
     assert app.state.github_repository_reader.options["max_total_bytes"] == 800_000
     assert app.state.grounded_discussion is not None
     assert app.state.business_analyst is not None
-    assert app.state.chat_model_turn_limit == 2
+    assert app.state.chat_model_turn_limit == expected_turn_limit
     assert {
         (provider, str(values["model"]), str(values["family"]))
         for provider, values in provider_calls

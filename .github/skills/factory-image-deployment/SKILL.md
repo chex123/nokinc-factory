@@ -12,6 +12,18 @@ Use this skill for every production Factory image change. The verified sequence
 is implemented by `scripts/deploy_pilot.py` and invoked by
 `.github/workflows/deploy-pilot.yml`.
 
+## Repository Boundary and SDLC
+
+- Resolve the Factory repository root with `git rev-parse --show-toplevel` and
+   keep code, tests, artifacts, and linked worktrees inside that root. Use
+   `<repo-root>/.worktrees/<task>` for isolation; never create a sibling worktree
+   under the workspace wrapper or outside the repository. Preserve dirty user
+   changes; do not reset, clean, stash, or switch their checkout.
+- Use a feature branch and test-first changes. Run focused tests, the protected
+   deployment quality sequence, and review before requesting promotion. Commit
+   and push only with explicit user authorization; never merge or deploy around
+   required review or environment approvals.
+
 ## Required Controls
 
 1. Deploy only from the protected `main` branch through the manual
@@ -41,9 +53,11 @@ is implemented by `scripts/deploy_pilot.py` and invoked by
 8. Report the source commit, immutable tag, digest, scan status/severity counts,
    task-definition revision, and ECS rollout result. Do not print credentials,
    AWS login output, provider responses, or task environment secret values.
-9. Leave `FACTORY_CHAT_MODEL_TURN_LIMIT` unchanged by default. Raise it only when
-   the user explicitly authorizes a count of additional turns; the value is the
-   cumulative ceiling, each turn consumes two provider calls, and failed or
+9. Leave `FACTORY_CHAT_MODEL_TURN_LIMIT` unchanged by default. Accept a positive
+   integer for a finite cumulative tenant limit or `unlimited` only when the user
+   explicitly authorizes uncapped testing. `unlimited` removes the application
+   turn ceiling, not provider quotas or charges; it has no hard dollar ceiling.
+   Every turn is durably reserved before two provider calls, and failed or
    interrupted reservations are never refunded.
 
 ## One-Time Setup
@@ -64,8 +78,9 @@ is implemented by `scripts/deploy_pilot.py` and invoked by
 From the Actions page, select `deploy-pilot` on `main` and supply a new tag such
 as `pilot-<short-sha>-<utc-timestamp>`. The workflow runs tests, waits for the
 protected environment, assumes the OIDC role, then calls the deployment script.
-For the current authorization of five additional turns, set the cumulative
-`model_turn_limit` input to `7`; leave it blank on ordinary image deployments.
+For explicitly authorized uncapped testing, set `model_turn_limit` to
+`unlimited`; the live service remains unchanged until the protected deployment
+completes. Leave the input blank on ordinary image deployments.
 For local code-only checks, use:
 
 ```powershell

@@ -386,12 +386,19 @@ def build_app() -> FastAPI:
     issuer = os.getenv("FACTORY_AUTH_ISSUER", "factory")
     audience = os.getenv("FACTORY_AUTH_AUDIENCE", "factory-api")
     chat_model_turn_limit_text = os.getenv("FACTORY_CHAT_MODEL_TURN_LIMIT", "0").strip()
-    try:
-        chat_model_turn_limit = int(chat_model_turn_limit_text)
-    except ValueError:
-        raise RuntimeError("FACTORY_CHAT_MODEL_TURN_LIMIT must be a nonnegative integer") from None
-    if chat_model_turn_limit < 0:
-        raise RuntimeError("FACTORY_CHAT_MODEL_TURN_LIMIT must be a nonnegative integer")
+    if chat_model_turn_limit_text.casefold() == "unlimited":
+        chat_model_turn_limit = None
+    else:
+        try:
+            chat_model_turn_limit = int(chat_model_turn_limit_text)
+        except ValueError:
+            raise RuntimeError(
+                "FACTORY_CHAT_MODEL_TURN_LIMIT must be a nonnegative integer or 'unlimited'"
+            ) from None
+        if chat_model_turn_limit < 0:
+            raise RuntimeError(
+                "FACTORY_CHAT_MODEL_TURN_LIMIT must be a nonnegative integer or 'unlimited'"
+            )
     chat_model_tenant_id = os.getenv("FACTORY_CHAT_MODEL_TENANT_ID", "").strip() or None
     principal_verifier: PrincipalVerifier | None = None
     browser_login: BrowserLoginPort | None = None
@@ -441,7 +448,7 @@ def build_app() -> FastAPI:
     if (
         environment in {"pilot", "staging", "production"}
         and github_repository_reader is not None
-        and chat_model_turn_limit > 0
+        and chat_model_turn_limit != 0
         and chat_model_tenant_id is None
     ):
         raise RuntimeError(

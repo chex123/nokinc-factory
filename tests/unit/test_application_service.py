@@ -738,7 +738,18 @@ def test_chat_provider_failure_logs_only_allowlisted_diagnostic_code(caplog) -> 
     assert provider_message not in caplog.text
 
 
-def test_chat_model_turn_limit_is_reserved_before_provider_call() -> None:
+@pytest.mark.parametrize(
+    ("turn_limit", "second_status", "expected_calls"),
+    [
+        pytest.param(1, 429, 1, id="bounded"),
+        pytest.param(None, 202, 2, id="unlimited"),
+    ],
+)
+def test_chat_model_turn_limit_is_reserved_before_provider_call(
+    turn_limit: int | None,
+    second_status: int,
+    expected_calls: int,
+) -> None:
     class FakeBusinessAnalyst:
         def __init__(self) -> None:
             self.calls = 0
@@ -781,7 +792,7 @@ def test_chat_model_turn_limit_is_reserved_before_provider_call() -> None:
         issuer="factory.test",
         audience="factory-api",
         business_analyst=analyst,
-        chat_model_turn_limit=1,
+        chat_model_turn_limit=turn_limit,
         chat_model_tenant_id="tenant-a",
         clock=lambda: NOW,
     ))
@@ -808,18 +819,22 @@ def test_chat_model_turn_limit_is_reserved_before_provider_call() -> None:
     )
 
     assert first.status_code == 202
-    assert second.status_code == 429
-    assert second.json()["detail"]["code"] == "CHAT_MODEL_TURN_LIMIT_REACHED"
-    assert analyst.calls == 1
+    assert second.status_code == second_status
+    if turn_limit is not None:
+        assert second.json()["detail"]["code"] == "CHAT_MODEL_TURN_LIMIT_REACHED"
+    assert analyst.calls == expected_calls
     trace = api.get(
         f"/v1/work-items/{work_item_id}/trace",
         headers=operator_headers,
     ).json()
-    assert [event["kind"] for event in trace["events"]] == [
+    expected_event_kinds = [
         "INTAKE",
         "CHAT_TURN_RESERVED",
         "CHAT_TURN_RECORDED",
     ]
+    if turn_limit is None:
+        expected_event_kinds.extend(("CHAT_TURN_RESERVED", "CHAT_TURN_RECORDED"))
+    assert [event["kind"] for event in trace["events"]] == expected_event_kinds
 
 
 def test_model_chat_is_restricted_to_the_authorized_pilot_tenant() -> None:

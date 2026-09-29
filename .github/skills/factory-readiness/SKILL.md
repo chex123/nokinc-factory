@@ -21,7 +21,13 @@ argument-hint: 'audit | execute Pass A | execute Pass B'
 ## Stable rules
 
 - Workspace root is a wrapper; factory/payments are separate Git repositories.
-  SDK/infra were only folders at the audit; check before any Git action.
+   SDK/infra were only folders at the audit; check before any Git action. Resolve
+   the selected repository root before all Git work; never work from the wrapper.
+- Keep every task worktree and task-owned artifact inside the selected repository.
+   Use `<repo-root>/.worktrees/<task>` for isolation; never create a sibling
+   worktree under the wrapper or outside the repo. `.worktrees/` is ignored.
+   Record branch, HEAD, dirty paths, and existing worktrees first; preserve dirty
+   user changes and use a new in-repo feature worktree rather than stashing them.
 - On Windows use each repository's existing virtual environment. The editor may
   select the factory interpreter for payments; it lacks target dependencies.
   Put Git Bash ahead of System32/WSL Bash for the subprocess test fixtures.
@@ -34,6 +40,9 @@ argument-hint: 'audit | execute Pass A | execute Pass B'
 - TDD: reproduce first, implement minimally, preserve frozen tests, verify
   focused/full tests/types/lint/coverage/scans and independent review. Never
   weaken evidence or repair the same failure speculatively more than twice.
+- Normal SDLC still applies to readiness work: test first, review the diff, and
+   keep artifacts, commits, and PRs bound to the selected repository. Commit,
+   push, merge, or deploy only when explicitly authorized.
 - Different model instances/provider labels do not prove family independence.
   Missing reviewer is unavailable, not a rejection or an approval.
 

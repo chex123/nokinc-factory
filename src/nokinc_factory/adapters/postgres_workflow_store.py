@@ -222,10 +222,10 @@ class PostgresWorkflowStore:
         work_item_id: str,
         actor_id: str,
         reservation: ChatTurnReservation,
-        limit: int,
+        limit: int | None,
         now: datetime,
     ) -> WorkflowEvent:
-        if limit <= 0:
+        if limit is not None and limit <= 0:
             raise ChatModelTurnLimitExceeded("Model-backed chat is disabled by turn-limit policy")
         event = WorkflowEvent(
             event_id=f"evt-{uuid4().hex}",
@@ -238,9 +238,10 @@ class PostgresWorkflowStore:
             chat_turn_reservation=reservation,
         )
         with self._transaction(tenant_id) as connection:
-            connection.execute(text(
-                "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"
-            ), {"key": f"{tenant_id}:chat-model-budget"})
+            if limit is not None:
+                connection.execute(text(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"
+                ), {"key": f"{tenant_id}:chat-model-budget"})
             item_row = connection.execute(select(workflow_items).where(
                 workflow_items.c.tenant_id == tenant_id,
                 workflow_items.c.work_item_id == work_item_id,
@@ -250,12 +251,13 @@ class PostgresWorkflowStore:
             item = self._item(item_row)
             if item.created_by != actor_id:
                 raise WorkflowStoreDenied("Work item not found")
-            used = connection.scalar(select(func.count()).select_from(workflow_events).where(
-                workflow_events.c.tenant_id == tenant_id,
-                workflow_events.c.kind == "CHAT_TURN_RESERVED",
-            ))
-            if int(used or 0) >= limit:
-                raise ChatModelTurnLimitExceeded("Tenant chat-turn limit exhausted")
+            if limit is not None:
+                used = connection.scalar(select(func.count()).select_from(workflow_events).where(
+                    workflow_events.c.tenant_id == tenant_id,
+                    workflow_events.c.kind == "CHAT_TURN_RESERVED",
+                ))
+                if int(used or 0) >= limit:
+                    raise ChatModelTurnLimitExceeded("Tenant chat-turn limit exhausted")
             connection.execute(text(
                 "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"
             ), {"key": f"{tenant_id}:{work_item_id}"})

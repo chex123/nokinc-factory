@@ -345,7 +345,7 @@ class ChatTurnReservation(ReviewModel):
 
 
 class ChatModelTurnLimitExceeded(ValueError):
-    """The tenant's explicit chat-turn count is exhausted, independent of spend."""
+    """The tenant's configured finite chat-turn count is exhausted."""
 
 
 class WorkflowEvent(ReviewModel):
@@ -526,24 +526,25 @@ class InMemoryWorkflowStore:
         work_item_id: str,
         actor_id: str,
         reservation: ChatTurnReservation,
-        limit: int,
+        limit: int | None,
         now: datetime,
     ) -> WorkflowEvent:
-        if limit <= 0:
+        if limit is not None and limit <= 0:
             raise ChatModelTurnLimitExceeded("Model-backed chat is disabled by turn-limit policy")
         with self._lock:
             key = (tenant_id, work_item_id)
             item = self._items.get(key)
             if item is None or item.created_by != actor_id:
                 raise ValueError("Work item not found")
-            used = sum(
-                event.kind == "CHAT_TURN_RESERVED"
-                for item_key, events in self._events.items()
-                if item_key[0] == tenant_id
-                for event in events
-            )
-            if used >= limit:
-                raise ChatModelTurnLimitExceeded("Tenant chat-turn limit exhausted")
+            if limit is not None:
+                used = sum(
+                    event.kind == "CHAT_TURN_RESERVED"
+                    for item_key, events in self._events.items()
+                    if item_key[0] == tenant_id
+                    for event in events
+                )
+                if used >= limit:
+                    raise ChatModelTurnLimitExceeded("Tenant chat-turn limit exhausted")
             event = WorkflowEvent(
                 event_id=f"evt-{uuid4().hex}",
                 tenant_id=tenant_id,
@@ -620,7 +621,7 @@ class WorkflowStore(Protocol):
         work_item_id: str,
         actor_id: str,
         reservation: ChatTurnReservation,
-        limit: int,
+        limit: int | None,
         now: datetime,
     ) -> WorkflowEvent: ...
 
@@ -786,7 +787,7 @@ def create_app(*, auth_secret: bytes | None = None, issuer: str = "",
                github_repository_reader: GitHubRepositoryReaderPort | None = None,
                grounded_discussion: GroundedDiscussionPort | None = None,
                business_analyst: BusinessAnalystPort | None = None,
-               chat_model_turn_limit: int = 0,
+               chat_model_turn_limit: int | None = 0,
                chat_model_tenant_id: str | None = None,
                github_repositories: tuple[str, ...] = (),
                clock: Callable[[], datetime] | None = None) -> FastAPI:
@@ -815,9 +816,13 @@ def create_app(*, auth_secret: bytes | None = None, issuer: str = "",
         or len(github_repositories) != len(set(github_repositories))
     ):
         raise ValueError("GitHub App broker requires a distinct repository allowlist")
-    if isinstance(chat_model_turn_limit, bool) or chat_model_turn_limit < 0:
-        raise ValueError("chat model-turn limit must be a nonnegative integer")
-    if chat_model_turn_limit > 0 and not chat_model_tenant_id:
+    if chat_model_turn_limit is not None and (
+        isinstance(chat_model_turn_limit, bool)
+        or not isinstance(chat_model_turn_limit, int)
+        or chat_model_turn_limit < 0
+    ):
+        raise ValueError("chat model-turn limit must be a nonnegative integer or unlimited")
+    if chat_model_turn_limit != 0 and not chat_model_tenant_id:
         raise ValueError("a tenant ID is required when a chat model budget is enabled")
     application = FastAPI(title="nokinc-factory")
     mount_chat(application)
@@ -1096,7 +1101,7 @@ def create_app(*, auth_secret: bytes | None = None, issuer: str = "",
                 status_code=503,
                 detail="Business Analyst is unavailable",
             )
-        if model_configured and chat_model_turn_limit <= 0:
+        if model_configured and chat_model_turn_limit == 0:
             raise HTTPException(
                 status_code=503,
                 detail="Model-backed chat is disabled by budget policy",
