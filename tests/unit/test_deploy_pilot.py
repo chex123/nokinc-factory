@@ -323,3 +323,33 @@ def test_deployment_workflow_is_manual_main_only_and_uses_oidc() -> None:
     assert "cumulative ceiling" in skill_text
     assert "never refunded" in skill_text
     assert "factory-image-deployment/SKILL.md" in instructions.read_text(encoding="utf-8")
+
+
+def test_dev_extra_contains_full_runtime_and_analysis_test_dependencies() -> None:
+    import re
+    import tomllib
+
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    dev_dependencies = config["project"]["optional-dependencies"]["dev"]
+    phase_dependencies = (
+        set(config["project"]["optional-dependencies"]["phase1"])
+        | set(config["project"]["optional-dependencies"]["phase2"])
+    )
+    names = {
+        re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].casefold().replace("_", "-")
+        for requirement in dev_dependencies
+    }
+
+    assert phase_dependencies <= set(dev_dependencies)
+    assert {
+        "fastapi",
+        "uvicorn",
+        "alembic",
+        "boto3",
+        "pyjwt",
+        "mcp",
+        "tree-sitter",
+        "tree-sitter-language-pack",
+        "multilspy",
+    } <= names
